@@ -1,7 +1,30 @@
 [project]
 name = "mave"
 version = "0.1.0"
-description = "Add your description here"
+description = "Intelligent problem resolution system for HPC logs using Pydantic-AI"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "openai>=3.28.0",
+    "pydantic>=2.14.0",
+    "pydantic-ai>=2.55.0",
+    "pydantic-settings>=2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.17.0",
+    "ty>=0.0.86",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+ignore = []
+
+[tool.ty]
+# Configuration for ty type checker
