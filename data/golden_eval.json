@@ -1,0 +1,1052 @@
+[
+  {
+    "raw": "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10001 node-2 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3550 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10002 node-3 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3600 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10003 node-4 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3650 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10004 node-5 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3700 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10005 node-6 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3750 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10006 node-7 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3800 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10007 node-8 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3850 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10008 node-9 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3900 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10009 node-10 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3950 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10010 node-11 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 4000 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10011 node-12 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 4050 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10012 node-13 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 4100 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10013 node-14 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 4150 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10014 node-15 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 4200 3515 3479 )",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_fan_telemetry"
+  },
+  {
+    "raw": "10015 node-1 node temphigh 1086195570 1 ambient=20",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10016 node-2 node temphigh 1086195570 1 ambient=21",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10017 node-3 node temphigh 1086195570 1 ambient=22",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10018 node-4 node temphigh 1086195570 1 ambient=23",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10019 node-5 node temphigh 1086195570 1 ambient=24",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10020 node-6 node temphigh 1086195570 1 ambient=25",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10021 node-7 node temphigh 1086195570 1 ambient=26",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10022 node-8 node temphigh 1086195570 1 ambient=27",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10023 node-9 node temphigh 1086195570 1 ambient=28",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10024 node-10 node temphigh 1086195570 1 ambient=29",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10025 node-11 node temphigh 1086195570 1 ambient=30",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10026 node-12 node temphigh 1086195570 1 ambient=31",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10027 node-13 node temphigh 1086195570 1 ambient=32",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10028 node-14 node temphigh 1086195570 1 ambient=33",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10029 node-15 node temphigh 1086195570 1 ambient=34",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_ambient_telemetry"
+  },
+  {
+    "raw": "10030 Interconnect-1T00 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10031 Interconnect-1T01 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10032 Interconnect-1T02 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10033 Interconnect-1T03 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10034 Interconnect-1T04 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10035 Interconnect-1T05 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10036 Interconnect-1T06 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10037 Interconnect-1T07 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10038 Interconnect-1T08 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10039 Interconnect-1T09 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10040 Interconnect-1T10 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10041 Interconnect-1T11 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10042 Interconnect-1T12 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10043 Interconnect-1T13 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10044 Interconnect-1T14 switch_module bcast-error 1074220138 1 Link ok",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_link_heartbeat"
+  },
+  {
+    "raw": "10045 node-1 unix.hw status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "unix.hw",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10046 node-2 switch_module status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10047 node-3 resourcemgmtdaeomon status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10048 node-4 unix.hw status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "unix.hw",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10049 node-5 switch_module status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10050 node-6 resourcemgmtdaeomon status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10051 node-7 unix.hw status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "unix.hw",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10052 node-8 switch_module status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10053 node-9 resourcemgmtdaeomon status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10054 node-10 unix.hw status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "unix.hw",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10055 node-11 switch_module status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10056 node-12 resourcemgmtdaeomon status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10057 node-13 unix.hw status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "unix.hw",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10058 node-14 switch_module status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "switch_module",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10059 node-15 resourcemgmtdaeomon status 1074220200 1 normal",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_health_normal"
+  },
+  {
+    "raw": "10060 node-1 resourcemgmtdaeomon heartbeat 1074220300 1 status running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10061 node-2 node heartbeat 1074220300 1 responding",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10062 node-3 boot_cmd heartbeat 1074220300 1 running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "boot_cmd",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10063 node-4 resourcemgmtdaeomon heartbeat 1074220300 1 status running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10064 node-5 node heartbeat 1074220300 1 responding",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10065 node-6 boot_cmd heartbeat 1074220300 1 running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "boot_cmd",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10066 node-7 resourcemgmtdaeomon heartbeat 1074220300 1 status running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10067 node-8 node heartbeat 1074220300 1 responding",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10068 node-9 boot_cmd heartbeat 1074220300 1 running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "boot_cmd",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10069 node-10 resourcemgmtdaeomon heartbeat 1074220300 1 status running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10070 node-11 node heartbeat 1074220300 1 responding",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10071 node-12 boot_cmd heartbeat 1074220300 1 running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "boot_cmd",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10072 node-13 resourcemgmtdaeomon heartbeat 1074220300 1 status running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10073 node-14 node heartbeat 1074220300 1 responding",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "node",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "10074 node-15 boot_cmd heartbeat 1074220300 1 running",
+    "is_actionable": false,
+    "expected_severity": "INFO",
+    "expected_subsystem": "boot_cmd",
+    "category": "routine_daemon_running"
+  },
+  {
+    "raw": "460900 resourcemgmtdaeomon node-1 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460901 resourcemgmtdaeomon node-2 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460902 resourcemgmtdaeomon node-3 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460903 resourcemgmtdaeomon node-4 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460904 resourcemgmtdaeomon node-5 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460905 resourcemgmtdaeomon node-6 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460906 resourcemgmtdaeomon node-7 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460907 resourcemgmtdaeomon node-8 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460908 resourcemgmtdaeomon node-9 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_init_failure"
+  },
+  {
+    "raw": "460920 resourcemgmtdaeomon node-10 server daemon 1145552220 1 master timeout waiting for heartbeat from node controller",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_controller_timeout"
+  },
+  {
+    "raw": "460921 resourcemgmtdaeomon node-11 server daemon 1145552220 1 master timeout waiting for heartbeat from node controller",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_controller_timeout"
+  },
+  {
+    "raw": "460922 resourcemgmtdaeomon node-12 server daemon 1145552220 1 master timeout waiting for heartbeat from node controller",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_controller_timeout"
+  },
+  {
+    "raw": "460930 resourcemgmtdaeomon node-20 daemon bootstrap 1145552230 1 daemon startup failed unable to bind controller socket",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_bind_failure"
+  },
+  {
+    "raw": "460931 resourcemgmtdaeomon node-21 daemon bootstrap 1145552230 1 daemon startup failed unable to bind controller socket",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_bind_failure"
+  },
+  {
+    "raw": "460932 resourcemgmtdaeomon node-22 daemon bootstrap 1145552230 1 daemon startup failed unable to bind controller socket",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "resourcemgmtdaeomon",
+    "category": "daemon_bind_failure"
+  },
+  {
+    "raw": "110000 node-1 clusterfilesystem fdmn.panic 1100000000 1 ServerFileSystem: ServerFileSystem domain scratch1 is panicked",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_panic"
+  },
+  {
+    "raw": "110001 node-2 clusterfilesystem fdmn.panic 1100000000 1 ServerFileSystem: ServerFileSystem domain scratch2 is panicked",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_panic"
+  },
+  {
+    "raw": "110002 node-3 clusterfilesystem fdmn.panic 1100000000 1 ServerFileSystem: ServerFileSystem domain scratch3 is panicked",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_panic"
+  },
+  {
+    "raw": "110003 node-4 clusterfilesystem fdmn.panic 1100000000 1 ServerFileSystem: ServerFileSystem domain scratch4 is panicked",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_panic"
+  },
+  {
+    "raw": "110004 node-5 clusterfilesystem fdmn.panic 1100000000 1 ServerFileSystem: ServerFileSystem domain scratch5 is panicked",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_panic"
+  },
+  {
+    "raw": "110005 node-6 clusterfilesystem fdmn.panic 1100000000 1 ServerFileSystem: ServerFileSystem domain scratch6 is panicked",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_panic"
+  },
+  {
+    "raw": "110010 node-1 clusterfilesystem fdmn.full 1100000001 1 ServerFileSystem: ServerFileSystem domain vol1 is full",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_full"
+  },
+  {
+    "raw": "110011 node-2 clusterfilesystem fdmn.full 1100000001 1 ServerFileSystem: ServerFileSystem domain vol2 is full",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_full"
+  },
+  {
+    "raw": "110012 node-3 clusterfilesystem fdmn.full 1100000001 1 ServerFileSystem: ServerFileSystem domain vol3 is full",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_full"
+  },
+  {
+    "raw": "110013 node-4 clusterfilesystem fdmn.full 1100000001 1 ServerFileSystem: ServerFileSystem domain vol4 is full",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_full"
+  },
+  {
+    "raw": "110014 node-5 clusterfilesystem fdmn.full 1100000001 1 ServerFileSystem: ServerFileSystem domain vol5 is full",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_full"
+  },
+  {
+    "raw": "110015 node-6 clusterfilesystem fdmn.full 1100000001 1 ServerFileSystem: ServerFileSystem domain vol6 is full",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_full"
+  },
+  {
+    "raw": "110020 node-10 clusterfilesystem cfs.nosrv 1100000002 1 ClusterFileSystem: no server for serverfilesystem domain archive1",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_unserved_domain"
+  },
+  {
+    "raw": "110021 node-11 clusterfilesystem cfs.nosrv 1100000002 1 ClusterFileSystem: no server for serverfilesystem domain archive2",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_unserved_domain"
+  },
+  {
+    "raw": "110025 node-25 clusterfilesystem cfs.corrupt 1100000003 1 ServerFileSystem: metadata corruption detected in btree root",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "clusterfilesystem",
+    "category": "filesystem_metadata_corruption"
+  },
+  {
+    "raw": "120000 node-1 unix.hw net.down 1084557830 1 interface alt0 is down",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "network_interface_down"
+  },
+  {
+    "raw": "120001 node-2 unix.hw net.down 1084557830 1 interface alt0 is down",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "network_interface_down"
+  },
+  {
+    "raw": "120002 node-3 unix.hw net.down 1084557830 1 interface alt0 is down",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "network_interface_down"
+  },
+  {
+    "raw": "120003 node-4 unix.hw net.down 1084557830 1 interface alt0 is down",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "network_interface_down"
+  },
+  {
+    "raw": "120004 node-5 unix.hw net.down 1084557830 1 interface alt0 is down",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "network_interface_down"
+  },
+  {
+    "raw": "120005 node-6 unix.hw net.down 1084557830 1 interface alt0 is down",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "network_interface_down"
+  },
+  {
+    "raw": "120010 node-10 unix.hw state_change.unavailable 1084557829 1 Component State Change: Component \"alt0\" is in the unavailable state (HWID=3000)",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "hardware_component_unavailable"
+  },
+  {
+    "raw": "120011 node-11 unix.hw state_change.unavailable 1084557829 1 Component State Change: Component \"alt0\" is in the unavailable state (HWID=3001)",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "hardware_component_unavailable"
+  },
+  {
+    "raw": "120012 node-12 unix.hw state_change.unavailable 1084557829 1 Component State Change: Component \"alt0\" is in the unavailable state (HWID=3002)",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "hardware_component_unavailable"
+  },
+  {
+    "raw": "120013 node-13 unix.hw state_change.unavailable 1084557829 1 Component State Change: Component \"alt0\" is in the unavailable state (HWID=3003)",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "hardware_component_unavailable"
+  },
+  {
+    "raw": "120014 node-14 unix.hw state_change.unavailable 1084557829 1 Component State Change: Component \"alt0\" is in the unavailable state (HWID=3004)",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "hardware_component_unavailable"
+  },
+  {
+    "raw": "120015 node-15 unix.hw state_change.unavailable 1084557829 1 Component State Change: Component \"alt0\" is in the unavailable state (HWID=3005)",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "unix.hw",
+    "category": "hardware_component_unavailable"
+  },
+  {
+    "raw": "120020 node-20 unix.hw mem.ecc 1084557835 1 Memory ECC multi-bit uncorrectable fault detected on DIMM 1",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "unix.hw",
+    "category": "memory_ecc_fault"
+  },
+  {
+    "raw": "120021 node-21 unix.hw mem.ecc 1084557835 1 Memory ECC multi-bit uncorrectable fault detected on DIMM 2",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "unix.hw",
+    "category": "memory_ecc_fault"
+  },
+  {
+    "raw": "120022 node-22 unix.hw mem.ecc 1084557835 1 Memory ECC multi-bit uncorrectable fault detected on DIMM 3",
+    "is_actionable": true,
+    "expected_severity": "CRITICAL",
+    "expected_subsystem": "unix.hw",
+    "category": "memory_ecc_fault"
+  },
+  {
+    "raw": "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130001 Interconnect-1T01 switch_module psu 1074220000 1 PSU status ( on off )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130002 Interconnect-1T02 switch_module psu 1074220000 1 PSU status ( off on )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130003 Interconnect-1T03 switch_module psu 1074220000 1 PSU status ( on off )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130004 Interconnect-1T04 switch_module psu 1074220000 1 PSU status ( off on )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130005 Interconnect-1T05 switch_module psu 1074220000 1 PSU status ( on off )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130006 Interconnect-1T06 switch_module psu 1074220000 1 PSU status ( off on )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130007 Interconnect-1T07 switch_module psu 1074220000 1 PSU status ( on off )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130008 Interconnect-1T08 switch_module psu 1074220000 1 PSU status ( off on )",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_psu_failure"
+  },
+  {
+    "raw": "130010 Interconnect-1T10 switch_module temp 1074220010 1 Switch module temperature 85C exceeds warning threshold",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_temperature_overheat"
+  },
+  {
+    "raw": "130011 Interconnect-1T11 switch_module temp 1074220010 1 Switch module temperature 86C exceeds warning threshold",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_temperature_overheat"
+  },
+  {
+    "raw": "130012 Interconnect-1T12 switch_module temp 1074220010 1 Switch module temperature 87C exceeds warning threshold",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_temperature_overheat"
+  },
+  {
+    "raw": "130020 Interconnect-1T20 switch_module bcast 1074220020 1 Interconnect switch port 1 link flapping detected, bcast-error link in reset",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_link_flapping"
+  },
+  {
+    "raw": "130021 Interconnect-1T21 switch_module bcast 1074220020 1 Interconnect switch port 2 link flapping detected, bcast-error link in reset",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_link_flapping"
+  },
+  {
+    "raw": "130022 Interconnect-1T22 switch_module bcast 1074220020 1 Interconnect switch port 3 link flapping detected, bcast-error link in reset",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "switch_module",
+    "category": "switch_link_flapping"
+  },
+  {
+    "raw": "140000 node-1 boot_cmd cmf 1090000000 1 Boot command error: CMF-port this node is not connected",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_cmf_port_disconnected"
+  },
+  {
+    "raw": "140001 node-2 boot_cmd cmf 1090000000 1 Boot command error: CMF-port this node is not connected",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_cmf_port_disconnected"
+  },
+  {
+    "raw": "140002 node-3 boot_cmd cmf 1090000000 1 Boot command error: CMF-port this node is not connected",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_cmf_port_disconnected"
+  },
+  {
+    "raw": "140003 node-4 boot_cmd cmf 1090000000 1 Boot command error: CMF-port this node is not connected",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_cmf_port_disconnected"
+  },
+  {
+    "raw": "140004 node-5 boot_cmd cmf 1090000000 1 Boot command error: CMF-port this node is not connected",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_cmf_port_disconnected"
+  },
+  {
+    "raw": "140010 node-10 boot_cmd state 1090000010 1 Boot command failed: state determination error, command has been aborted",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_command_aborted"
+  },
+  {
+    "raw": "140011 node-11 boot_cmd state 1090000010 1 Boot command failed: state determination error, command has been aborted",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_command_aborted"
+  },
+  {
+    "raw": "140012 node-12 boot_cmd state 1090000010 1 Boot command failed: state determination error, command has been aborted",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_command_aborted"
+  },
+  {
+    "raw": "140013 node-13 boot_cmd state 1090000010 1 Boot command failed: state determination error, command has been aborted",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_command_aborted"
+  },
+  {
+    "raw": "140014 node-14 boot_cmd state 1090000010 1 Boot command failed: state determination error, command has been aborted",
+    "is_actionable": true,
+    "expected_severity": "HIGH",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_command_aborted"
+  },
+  {
+    "raw": "140020 node-20 boot_cmd console 1090000020 1 Boot command failed: console busy, timeout waiting for SRM prompt",
+    "is_actionable": true,
+    "expected_severity": "MEDIUM",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_srm_prompt_timeout"
+  },
+  {
+    "raw": "140021 node-21 boot_cmd console 1090000020 1 Boot command failed: console busy, timeout waiting for SRM prompt",
+    "is_actionable": true,
+    "expected_severity": "MEDIUM",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_srm_prompt_timeout"
+  },
+  {
+    "raw": "140022 node-22 boot_cmd console 1090000020 1 Boot command failed: console busy, timeout waiting for SRM prompt",
+    "is_actionable": true,
+    "expected_severity": "MEDIUM",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_srm_prompt_timeout"
+  },
+  {
+    "raw": "140023 node-23 boot_cmd console 1090000020 1 Boot command failed: console busy, timeout waiting for SRM prompt",
+    "is_actionable": true,
+    "expected_severity": "MEDIUM",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_srm_prompt_timeout"
+  },
+  {
+    "raw": "140024 node-24 boot_cmd console 1090000020 1 Boot command failed: console busy, timeout waiting for SRM prompt",
+    "is_actionable": true,
+    "expected_severity": "MEDIUM",
+    "expected_subsystem": "boot_cmd",
+    "category": "boot_srm_prompt_timeout"
+  }
+]
