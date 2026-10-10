@@ -1,8 +1,61 @@
-"""Data models for HPC log events and rules."""
+"""Data models for HPC log events, rules, and problem resolutions."""
 
+import re
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
+
+
+class ProblemResolution(BaseModel):
+    """Structured resolution schema for HPC error diagnosis and remediation."""
+
+    error_summary: str = Field(default="", description="Summary of the detected error")
+    root_cause: str = Field(default="", description="Root cause of the error")
+    severity: str = Field(
+        default="UNKNOWN",
+        description="Severity level (e.g., LOW, MEDIUM, HIGH, CRITICAL)",
+    )
+    remediation_steps: list[str] = Field(
+        default_factory=list,
+        description="Ordered remediation actions",
+    )
+    citations_and_reasons: list[str] = Field(
+        default_factory=list,
+        description="Citations and technical rationale",
+    )
+
+
+class Rule(BaseModel):
+    """Pre-configured rule for fast-path problem resolution."""
+
+    rule_id: str = Field(default="", description="Unique identifier for the rule")
+    subsystem: str = Field(default="*", description="Subsystem filter or '*' for all")
+    event_type: str = Field(default="*", description="Event type filter or '*' for all")
+    pattern: str = Field(
+        default="",
+        description="Regular expression pattern to match against event.message",
+    )
+    resolution: ProblemResolution = Field(
+        description="ProblemResolution payload returned upon match"
+    )
+
+    _compiled: re.Pattern[str] | None = PrivateAttr(default=None)
+
+    def get_compiled_pattern(self) -> re.Pattern[str]:
+        """Return or lazily compile the cached regex pattern."""
+        if self._compiled is None:
+            try:
+                self._compiled = re.compile(self.pattern, re.IGNORECASE)
+            except re.error:
+                self._compiled = re.compile(re.escape(self.pattern), re.IGNORECASE)
+        return self._compiled
+
+    def matches(self, message: str) -> bool:
+        """Check whether message matches the rule pattern."""
+        try:
+            return bool(self.get_compiled_pattern().search(message))
+        except Exception:
+            return False
 
 
 class LogEvent(BaseModel):

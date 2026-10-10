@@ -6,6 +6,9 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.config import Settings, get_settings
+from src.rules.models import ProblemResolution
+
+__all__ = ["ProblemResolution", "create_agent"]
 
 
 def create_agent(settings: Settings | None = None) -> Agent[Settings, str]:
