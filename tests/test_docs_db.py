@@ -153,3 +153,18 @@ def test_citations_present_on_all_runbook_entries() -> None:
         assert entry.citation.endswith("]")
         assert len(entry.remediation_steps) >= 2
         assert len(entry.root_cause) > 10
+        assert isinstance(entry.remediation_steps, tuple)
+        assert isinstance(entry.keywords, tuple)
+
+
+def test_runbook_entry_immutability_and_tuple_types() -> None:
+    entry = RunbookEntry(
+        subsystem="test_sub",
+        scenario="test_scenario",
+        root_cause="test_root_cause",
+        remediation_steps=("step 1", "step 2"),
+        citation="[LANL HPC Runbook: test]",
+        keywords=("kw1", "kw2"),
+    )
+    assert isinstance(entry.remediation_steps, tuple)
+    assert isinstance(entry.keywords, tuple)

@@ -5,6 +5,7 @@ from src.knowledge.docs_db import (
     get_all_runbooks,
     list_known_subsystems,
     query_subsystem_docs,
+    resolve_subsystem,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "get_all_runbooks",
     "list_known_subsystems",
     "query_subsystem_docs",
+    "resolve_subsystem",
 ]

@@ -1,6 +1,8 @@
 """Fast-path Rule Tree engine and dynamic resolution cache."""
 
 import re
+from collections import OrderedDict
+from typing import Any
 
 from src.rules.models import LogEvent, ProblemResolution, Rule
 from src.rules.normalizer import parse_log_line
@@ -127,24 +129,25 @@ def get_default_rules() -> list[Rule]:
 class RuleTreeEngine:
     """Fast-path hierarchical rule tree engine and dynamic resolution cache."""
 
-    def __init__(self, load_defaults: bool = False) -> None:
+    def __init__(self, load_defaults: bool = False, max_cache_size: int = 10_000) -> None:
+        self._max_cache_size: int = max_cache_size
         # Hierarchical tree index: (subsystem, event_type) -> list[Rule]
         self._tree: dict[tuple[str, str], list[Rule]] = {}
         # Dynamic exact cache: (subsystem, message) -> ProblemResolution
-        self._exact_cache: dict[tuple[str, str], ProblemResolution] = {}
+        self._exact_cache: OrderedDict[tuple[str, str], ProblemResolution] = OrderedDict()
         # Dynamic template cache: (subsystem, template) -> ProblemResolution
-        self._template_cache: dict[tuple[str, str], ProblemResolution] = {}
+        self._template_cache: OrderedDict[tuple[str, str], ProblemResolution] = OrderedDict()
         # Message-only fallback cache for logs with empty/missing subsystems
-        self._exact_msg_cache: dict[str, ProblemResolution] = {}
-        self._template_msg_cache: dict[str, ProblemResolution] = {}
+        self._exact_msg_cache: OrderedDict[str, ProblemResolution] = OrderedDict()
+        self._template_msg_cache: OrderedDict[str, ProblemResolution] = OrderedDict()
 
         if load_defaults:
             self.load_default_rules()
 
     @classmethod
-    def with_defaults(cls) -> "RuleTreeEngine":
+    def with_defaults(cls, max_cache_size: int = 10_000) -> "RuleTreeEngine":
         """Instantiate RuleTreeEngine pre-loaded with standard LANL HPC failure rules."""
-        return cls(load_defaults=True)
+        return cls(load_defaults=True, max_cache_size=max_cache_size)
 
     @property
     def rule_count(self) -> int:
@@ -177,6 +180,30 @@ class RuleTreeEngine:
         self._exact_msg_cache.clear()
         self._template_msg_cache.clear()
 
+    def _store_cache_entry(
+        self,
+        cache: OrderedDict[Any, ProblemResolution],
+        key: Any,
+        value: ProblemResolution,
+    ) -> None:
+        """Store key-value pair in LRU cache with capacity ceiling."""
+        if key in cache:
+            cache.move_to_end(key)
+        cache[key] = value
+        if len(cache) > self._max_cache_size:
+            cache.popitem(last=False)
+
+    def _get_cache_entry(
+        self,
+        cache: OrderedDict[Any, ProblemResolution],
+        key: Any,
+    ) -> ProblemResolution | None:
+        """Retrieve key from LRU cache, updating LRU order if found."""
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        return None
+
     def add_rule(self, rule: Rule) -> None:
         """Register a pre-configured rule into the hierarchical index."""
         sub = rule.subsystem.strip().lower()
@@ -208,17 +235,17 @@ class RuleTreeEngine:
         template = extract_template(msg)
 
         # Store in exact cache
-        self._exact_cache[(sub, msg)] = resolution
-        self._exact_msg_cache[msg] = resolution
+        self._store_cache_entry(self._exact_cache, (sub, msg), resolution)
+        self._store_cache_entry(self._exact_msg_cache, msg, resolution)
 
         # Store in template cache
-        self._template_cache[(sub, template)] = resolution
-        self._template_msg_cache[template] = resolution
+        self._store_cache_entry(self._template_cache, (sub, template), resolution)
+        self._store_cache_entry(self._template_msg_cache, template, resolution)
 
         # If subsystem was unspecified or wildcard, cache under wildcard
         if not sub or sub == "*":
-            self._exact_cache[("*", msg)] = resolution
-            self._template_cache[("*", template)] = resolution
+            self._store_cache_entry(self._exact_cache, ("*", msg), resolution)
+            self._store_cache_entry(self._template_cache, ("*", template), resolution)
 
     def _get_candidate_rules(self, sub: str, ev_type: str) -> list[Rule]:
         """Fetch candidate rules in order of specificity."""
@@ -271,25 +298,32 @@ class RuleTreeEngine:
                         return rule.resolution
 
         # 2. Check exact dynamic cache (subsystem + message)
-        if (sub, msg) in self._exact_cache:
-            return self._exact_cache[(sub, msg)]
+        res = self._get_cache_entry(self._exact_cache, (sub, msg))
+        if res is not None:
+            return res
 
-        if ("*", msg) in self._exact_cache:
-            return self._exact_cache[("*", msg)]
+        res = self._get_cache_entry(self._exact_cache, ("*", msg))
+        if res is not None:
+            return res
 
         # 3. Check template dynamic cache (subsystem + template)
         template = extract_template(msg)
-        if (sub, template) in self._template_cache:
-            return self._template_cache[(sub, template)]
+        res = self._get_cache_entry(self._template_cache, (sub, template))
+        if res is not None:
+            return res
 
-        if ("*", template) in self._template_cache:
-            return self._template_cache[("*", template)]
+        res = self._get_cache_entry(self._template_cache, ("*", template))
+        if res is not None:
+            return res
 
-        # 4. Message-only fallback caches
-        if msg in self._exact_msg_cache:
-            return self._exact_msg_cache[msg]
+        # 4. Message-only fallback caches (only evaluated when subsystem is empty/missing)
+        if not sub:
+            res = self._get_cache_entry(self._exact_msg_cache, msg)
+            if res is not None:
+                return res
 
-        if template in self._template_msg_cache:
-            return self._template_msg_cache[template]
+            res = self._get_cache_entry(self._template_msg_cache, template)
+            if res is not None:
+                return res
 
         return None

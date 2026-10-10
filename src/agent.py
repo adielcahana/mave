@@ -11,6 +11,7 @@ from src.knowledge.docs_db import (
     get_all_runbooks,
     list_known_subsystems,
     query_subsystem_docs,
+    resolve_subsystem,
 )
 from src.rules.models import LogEvent, ProblemResolution
 
@@ -124,17 +125,34 @@ def _build_incident_prompt(log_event: LogEvent) -> str:
 def _fallback_offline_resolution(log_event: LogEvent, exc: Exception) -> ProblemResolution:
     """Generate a grounded ProblemResolution fallback using local runbooks when offline."""
     # Look for matching runbooks in the local database
-    normalized_subsys = log_event.subsystem.strip().lower()
-    matching_entries = [
+    resolved_subsys = resolve_subsystem(log_event.subsystem)
+    all_runbooks = get_all_runbooks()
+    msg_lower = log_event.message.lower()
+
+    # Filter entries matching the resolved subsystem
+    subsystem_entries = [entry for entry in all_runbooks if entry.subsystem == resolved_subsys]
+
+    # 1. Prioritize entries matching both subsystem AND keywords
+    both_matches = [
         entry
-        for entry in get_all_runbooks()
-        if entry.subsystem == normalized_subsys
-        or any(kw in log_event.message.lower() for kw in entry.keywords)
+        for entry in subsystem_entries
+        if any(kw.lower() in msg_lower for kw in entry.keywords)
     ]
 
-    if matching_entries:
-        entry = matching_entries[0]
-        severity = "CRITICAL" if "panic" in log_event.message.lower() else "HIGH"
+    if both_matches:
+        entry = both_matches[0]
+    elif subsystem_entries:
+        # 2. Only if none match keywords fall back to general subsystem entries
+        entry = subsystem_entries[0]
+    else:
+        # 3. If subsystem has no direct entries, check global keyword matches
+        kw_matches = [
+            entry for entry in all_runbooks if any(kw.lower() in msg_lower for kw in entry.keywords)
+        ]
+        entry = kw_matches[0] if kw_matches else None
+
+    if entry is not None:
+        severity = "CRITICAL" if "panic" in msg_lower else "HIGH"
         return ProblemResolution(
             error_summary=f"[{log_event.node}] {entry.scenario} ({log_event.message})",
             root_cause=entry.root_cause,

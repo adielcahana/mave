@@ -237,3 +237,61 @@ def test_sub_millisecond_matching_speed():
 
     # Elapsed time for 1,000 matches must be well below 500ms (0.5ms per match)
     assert elapsed < 0.5, f"1,000 matches took {elapsed:.4f}s (> 0.5s limit)"
+
+
+def test_fallback_cache_scoped_to_empty_subsystem():
+    """Verify that message-only fallback caches are only queried when subsystem is empty."""
+    engine = RuleTreeEngine()
+    res = ProblemResolution(
+        error_summary="Subsystem A specific error",
+        root_cause="Subsystem A failure",
+        severity="HIGH",
+        remediation_steps=["Fix sub_a"],
+        citations_and_reasons=["Sub_a runbook"],
+    )
+
+    raw_sub_a = "100 node-1 sub_a event_type 1000000000 1 generic failure code 42"
+    engine.cache_resolution(raw_sub_a, res)
+
+    # Event with different subsystem must NOT match via message fallback
+    raw_sub_b = "101 node-2 sub_b event_type 1000000001 1 generic failure code 42"
+    matched_b = engine.match(raw_sub_b)
+    assert matched_b is None
+
+    # Event with empty subsystem SHOULD match via message fallback
+    raw_no_sub = "102 node-3 - event_type 1000000002 1 generic failure code 42"
+    event_no_sub = parse_log_line(raw_no_sub)
+    event_no_sub.subsystem = ""
+    matched_no_sub = engine.match(event_no_sub)
+    assert matched_no_sub is not None
+    assert matched_no_sub.error_summary == "Subsystem A specific error"
+
+
+def test_lru_cache_capacity_bound_and_eviction():
+    """Verify LRU cache respects max_cache_size and evicts least recently used entries."""
+    engine = RuleTreeEngine(max_cache_size=3)
+
+    for i in range(4):
+        raw = f"100 node-1 sub ev 1000000000 1 error message variant {chr(65 + i)}"
+        res = ProblemResolution(
+            error_summary=f"Error {i}",
+            root_cause=f"Cause {i}",
+            severity="LOW",
+            remediation_steps=[f"Fix {i}"],
+            citations_and_reasons=[f"Doc {i}"],
+        )
+        engine.cache_resolution(raw, res)
+
+    # Max cache capacity should cap at 3
+    assert engine.cache_size == 3
+    assert engine.template_cache_size == 3
+
+    # The oldest entry (message 0 / variant A) should have been evicted
+    raw_0 = "100 node-1 sub ev 1000000000 1 error message variant A"
+    assert engine.match(raw_0) is None
+
+    # The newest entry (message 3 / variant D) should still be in cache
+    raw_3 = "100 node-1 sub ev 1000000000 1 error message variant D"
+    matched_3 = engine.match(raw_3)
+    assert matched_3 is not None
+    assert matched_3.error_summary == "Error 3"

@@ -219,3 +219,33 @@ async def test_analyze_log_offline_graceful_fallback() -> None:
     assert len(resolution.remediation_steps) > 0
     assert len(resolution.citations_and_reasons) > 0
     assert "clusterfilesystem" in resolution.citations_and_reasons[0].lower()
+
+
+def test_fallback_offline_resolution_subsystem_and_keyword_priority() -> None:
+    """Verify _fallback_offline_resolution prioritizes subsystem+keyword matches
+    and resolves aliases.
+    """
+    from src.agent import _fallback_offline_resolution
+
+    # Test 1: Subsystem alias "resourcemgmt" resolved to "resourcemgmtdaeomon"
+    # and keyword "err = 10" matches config err10 runbook rather than controller timeout or startup
+    event_err10 = LogEvent(
+        log_id="1",
+        node="node-1",
+        subsystem="resourcemgmt",
+        event_type="server",
+        message="failed to configure resourcemgmt subsystem err = 10",
+    )
+    res_err10 = _fallback_offline_resolution(event_err10, Exception("offline test"))
+    assert "resourcemgmt-config-err10" in res_err10.citations_and_reasons[0]
+
+    # Test 2: Subsystem with no matching keywords falls back to general subsystem entry
+    event_general = LogEvent(
+        log_id="2",
+        node="node-2",
+        subsystem="cluster_filesystem",
+        event_type="general",
+        message="some unclassified filesystem event",
+    )
+    res_general = _fallback_offline_resolution(event_general, Exception("offline test"))
+    assert "clusterfilesystem" in res_general.citations_and_reasons[0].lower()

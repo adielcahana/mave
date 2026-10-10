@@ -13,6 +13,7 @@ from src.agent import ProblemResolution, create_agent
 from src.config import Settings
 from src.pipeline import LogPipeline, PipelineResult
 from src.rules.engine import RuleTreeEngine
+from src.rules.normalizer import parse_log_line
 
 
 @pytest.fixture
@@ -215,3 +216,91 @@ def test_cli_main_dispatch() -> None:
     ):
         main()
         mock_eval.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_pipeline_follower_recovers_from_leader_cancellation(
+    test_settings: Settings,
+    mock_resolution: ProblemResolution,
+) -> None:
+    """Verify follower coroutines recover gracefully if leader task is cancelled."""
+    rule_engine = RuleTreeEngine()
+    pipeline = LogPipeline(rule_engine=rule_engine, settings=test_settings)
+    error_line = "190000 node-10 custom_daemon fatal 1074220000 1 unexpected core failure"
+
+    leader_started = asyncio.Event()
+    leader_cancel = asyncio.Event()
+
+    async def flaky_analyze_log(*args: Any, **kwargs: Any) -> ProblemResolution:
+        if not leader_started.is_set():
+            leader_started.set()
+            # Wait until follower attaches, then simulate cancellation
+            await leader_cancel.wait()
+            raise asyncio.CancelledError("Leader task cancelled")
+        # Follower fallback call succeeds
+        return mock_resolution
+
+    with patch("src.pipeline.analyze_log", side_effect=flaky_analyze_log):
+        # Start leader task
+        leader_task = asyncio.create_task(pipeline.process_log(error_line))
+        await leader_started.wait()
+
+        # Start follower task which will attach to the in-flight leader future
+        follower_task = asyncio.create_task(pipeline.process_log(error_line))
+        # Yield control so follower enters in-flight attach check
+        await asyncio.sleep(0.01)
+
+        # Trigger leader cancellation
+        leader_cancel.set()
+
+        # Leader raises CancelledError
+        with pytest.raises(asyncio.CancelledError):
+            await leader_task
+
+        # Follower should recover gracefully, calling analyze_log itself
+        follower_result = await follower_task
+
+        assert follower_result.status == "AGENT_RESOLVED"
+        assert follower_result.cost_usd > 0.0
+        assert follower_result.resolution is not None
+        assert follower_result.resolution.error_summary == mock_resolution.error_summary
+
+        # The resolution should also be cached in rule_engine now
+        event = parse_log_line(error_line)
+        assert pipeline.rule_engine.match(event) is not None
+
+
+@pytest.mark.anyio
+async def test_pipeline_burst_cache_ttl_and_eviction(
+    test_settings: Settings,
+    mock_resolution: ProblemResolution,
+) -> None:
+    """Verify burst cache respects TTL window and capacity ceiling."""
+    pipeline = LogPipeline(
+        settings=test_settings,
+        burst_window_seconds=0.05,
+        max_burst_entries=2,
+    )
+
+    with patch("src.pipeline.analyze_log", return_value=mock_resolution):
+        # 1. First event recorded
+        line1 = "200001 node-1 sub1 err 1000000000 1 error 1"
+        res1 = await pipeline.process_log(line1)
+        assert res1.status == "AGENT_RESOLVED"
+
+        # 2. Second event recorded (burst cache has 2 entries)
+        line2 = "200002 node-2 sub2 err 1000000001 1 error 2"
+        res2 = await pipeline.process_log(line2)
+        assert res2.status == "AGENT_RESOLVED"
+        assert len(pipeline._recent_bursts) <= 2
+
+        # 3. Third event recorded (should evict oldest due to max_burst_entries=2)
+        line3 = "200003 node-3 sub3 err 1000000002 1 error 3"
+        res3 = await pipeline.process_log(line3)
+        assert res3.status == "AGENT_RESOLVED"
+        assert len(pipeline._recent_bursts) <= 2
+
+        # 4. Wait for TTL expiry (>0.05s)
+        await asyncio.sleep(0.06)
+        pipeline._cleanup_bursts()
+        assert len(pipeline._recent_bursts) == 0

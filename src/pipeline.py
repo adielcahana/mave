@@ -62,6 +62,7 @@ class LogPipeline:
         settings: Settings | None = None,
         burst_window_seconds: float = 5.0,
         agent_cost_usd: float = 0.0015,
+        max_burst_entries: int = 10_000,
     ) -> None:
         self.settings: Settings = _resolve_settings(settings)
         self.rule_engine: RuleTreeEngine = (
@@ -72,11 +73,32 @@ class LogPipeline:
         )
         self.burst_window_seconds: float = burst_window_seconds
         self.agent_cost_usd: float = agent_cost_usd
+        self._max_burst_entries: int = max_burst_entries
 
         # In-flight deduplication: dedup_key -> Future[ProblemResolution]
         self._in_flight: dict[str, asyncio.Future[ProblemResolution]] = {}
         # Recent burst cache: dedup_key -> (ProblemResolution, monotonic_timestamp)
         self._recent_bursts: dict[str, tuple[ProblemResolution, float]] = {}
+
+    def _cleanup_bursts(self, now: float | None = None) -> None:
+        """Evict burst entries older than the burst window."""
+        current_time = time.monotonic() if now is None else now
+        expired = [
+            k
+            for k, (_, ts) in self._recent_bursts.items()
+            if current_time - ts >= self.burst_window_seconds
+        ]
+        for k in expired:
+            self._recent_bursts.pop(k, None)
+
+    def _record_burst(self, dedup_key: str, resolution: ProblemResolution) -> None:
+        """Record resolution in recent burst cache with TTL eviction and capacity ceiling."""
+        now = time.monotonic()
+        self._cleanup_bursts(now)
+        self._recent_bursts[dedup_key] = (resolution, now)
+        if len(self._recent_bursts) > self._max_burst_entries:
+            oldest_key = min(self._recent_bursts, key=lambda k: self._recent_bursts[k][1])
+            self._recent_bursts.pop(oldest_key, None)
 
     def _get_dedup_key(self, event: LogEvent) -> str:
         """Derive canonical deduplication key from event subsystem and message template."""
@@ -130,21 +152,29 @@ class LogPipeline:
             fut = self._in_flight[dedup_key]
             try:
                 attached_resolution = await fut
-            except Exception:
+                status: PipelineStatus = "IN_FLIGHT_ATTACHED"
+                cost_usd = 0.0
+            except (Exception, asyncio.CancelledError):
                 attached_resolution = await analyze_log(
                     event, agent=self.agent, settings=self.settings
                 )
+                self.rule_engine.cache_resolution(event, attached_resolution)
+                self._record_burst(dedup_key, attached_resolution)
+                status = "AGENT_RESOLVED"
+                cost_usd = self.agent_cost_usd
+
             latency_ms = (time.perf_counter() - start) * 1000.0
             return PipelineResult(
                 log_id=event.log_id,
-                status="IN_FLIGHT_ATTACHED",
+                status=status,
                 resolution=attached_resolution,
-                cost_usd=0.0,
+                cost_usd=cost_usd,
                 latency_ms=latency_ms,
             )
 
         # Check recent burst window (<5 seconds)
         now = time.monotonic()
+        self._cleanup_bursts(now)
         if dedup_key in self._recent_bursts:
             recent_res, recent_ts = self._recent_bursts[dedup_key]
             if now - recent_ts < self.burst_window_seconds:
@@ -171,7 +201,7 @@ class LogPipeline:
 
             # Step 6: Dynamic caching into RuleTreeEngine and burst window tracking
             self.rule_engine.cache_resolution(event, resolution)
-            self._recent_bursts[dedup_key] = (resolution, time.monotonic())
+            self._record_burst(dedup_key, resolution)
 
             if not leader_future.done():
                 leader_future.set_result(resolution)
