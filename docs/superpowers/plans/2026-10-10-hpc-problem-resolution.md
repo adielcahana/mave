@@ -6,8 +6,8 @@
 
 **Architecture:** A two-tier pipeline:
 1. **Fast Path**: Raw logs are parsed into typed `LogEvent` records. Routine telemetry (`ambient=*`, `normal`, `running`, `Link ok`) is filtered instantly without LLM overhead. Actionable logs query an indexed Rule Tree cache for sub-millisecond, zero-cost resolution.
-2. **Slow Path**: Unseen errors route to a Pydantic-AI SRE agent equipped with a LANL HPC subsystem knowledge base tool. The agent produces structured, cited `ProblemResolution` outputs, which are automatically cached into the Rule Tree to ensure future-proofing.
-3. **Design-Only Architectures**: Enterprise ingestion (Kafka/Fluentbit/ClickHouse) and the offline Post-Mortem Rule Consolidation Agent are fully diagrammed and specified in `report.md`.
+2. **Slow Path**: Unseen errors route to a Pydantic-AI SRE agent equipped with a cluster subsystem knowledge base tool. The agent produces structured, cited `ProblemResolution` outputs, which are automatically cached into the Rule Tree to ensure future-proofing.
+3. **Design-Only Architectures**: Technology-agnostic enterprise ingestion (consume message queue from data lake) and the offline Post-Mortem Rule Consolidation Agent are fully diagrammed and specified in `report.md`.
 
 **Tech Stack:** Python 3.12+, Pydantic-AI, Pydantic v2, AsyncOpenAI (NVIDIA NIM), Pytest, Ruff, Ty.
 
@@ -19,11 +19,11 @@
 
 | Component | Nature | Destination | Description |
 | :--- | :--- | :--- | :--- |
-| **Ingestion Pipeline** | **Design Only** | `report.md` | Enterprise Kafka, Fluentbit, and ClickHouse/Snowflake streaming ingestion architecture diagram as explicitly instructed ("don't implement, just diagram"). |
+| **Ingestion Pipeline** | **Design Only** | `report.md` | Tech-stack agnostic streaming ingestion architecture diagram (consume message queue from data lake) as explicitly instructed ("don't implement, just diagram"). |
 | **Post-Mortem Consolidation Agent** | **Design Only** | `report.md` | Offline multi-agent consolidation loop, cross-incident clustering, and human approval workflow diagrammed and documented in the submission report. |
 | **Log Normalizer & Telemetry Filter** | **Actual Code** | `src/rules/normalizer.py`, `src/rules/telemetry_filter.py` | Wire-speed parser separating routine telemetry from actionable events. |
 | **Rule Tree & Resolution Cache** | **Actual Code** | `src/rules/models.py`, `src/rules/engine.py` | Hierarchical `(subsystem, event)` fast-path matcher and dynamic resolution cache. |
-| **Subsystem Knowledge Base** | **Actual Code** | `src/knowledge/docs_db.py` | Domain runbooks covering the 44 LANL HPC subsystem failure modes. |
+| **Subsystem Knowledge Base** | **Actual Code** | `src/knowledge/docs_db.py` | Domain runbooks covering the 44 cluster subsystem failure modes (from the Los Alamos National Laboratory benchmark). |
 | **Production SRE Agent** | **Actual Code** | `src/agent.py` | Pydantic-AI agent querying domain documentation and returning cited `ProblemResolution`. |
 | **Pipeline & In-Flight Burst Suppressor** | **Actual Code** | `src/pipeline.py` | Two-tier orchestrator with duplicate suppression for bursting error storms. |
 | **Golden Benchmark & Evaluation** | **Actual Code & Data** | `data/golden_eval.json`, `src/evaluation.py` | 150 diverse labeled logs measuring Precision, Recall, F1, and fast-path vs agent breakdown. |
@@ -495,10 +495,10 @@ git commit -m "feat(pipeline): implement stream pipeline and unified demo/eval C
 
 **Deliverables:**
 - **`report.md`**:
-  - **Data Ingestion Architecture Diagram & Writeup**: End-to-end Kafka, Fluentbit, and ClickHouse/Snowflake streaming ingestion architecture diagram as explicitly instructed ("don't implement, just diagram").
+  - **Data Ingestion Architecture Diagram & Writeup**: Tech-stack agnostic streaming ingestion architecture diagram (cluster log collectors $\rightarrow$ message queue $\rightarrow$ data lake / analytical storage) as explicitly instructed ("don't implement, just diagram").
   - **Post-Mortem Consolidation Agent Architecture Diagram & Writeup**: Offline multi-agent consolidation loop, cross-incident clustering, and human approval workflow diagrammed and documented in the report.
   - **System Thought Process & Two-Tier Trade-Offs**: Analysis of wire-speed triage vs deep reasoning, token savings, and latency guarantees.
-  - **Dataset Analysis Findings**: LANL System 20 analysis, 44 subsystem pairs, lack of official labels, and chronological drift.
+  - **Dataset Analysis Findings**: System 20 HPC cluster dataset analysis (44 subsystem pairs, lack of official labels, chronological drift).
   - **Quantitative Evaluation Results**: Precision, Recall, F1, and cost breakdown from `main.py evaluate`.
   - **Future Improvements**: Distributed vector stores, cross-node temporal anomaly detection.
 - **`README.md`**:

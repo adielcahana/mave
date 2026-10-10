@@ -10,33 +10,30 @@
 
 High Performance Computing (HPC) clusters generate high-throughput semi-structured log streams across thousands of compute nodes, service daemons, interconnect switches, and shared cluster filesystems. Failures cause severe job interruptions and cluster downtime. 
 
+The dataset used is the 433,490-line benchmark from System 20 at Los Alamos National Laboratory (LANL).
+
 The objective is to build an intelligent, future-proof problem resolution system that:
 1. Filters benign telemetry at wire speed without burning LLM tokens or introducing latency.
 2. Resolves recurring, known failure patterns via an instant fast-path **Rule Engine / Resolution Cache**.
 3. Deploys a **Real-Time SRE Agent** (powered by Pydantic-AI and NVIDIA NIM) to investigate novel, unseen errors by querying subsystem documentation and log context.
-4. Closes the learning loop with an asynchronous **Post-Mortem Consolidation Agent** that synthesizes generalized rules from novel incidents, verifies them with **hard-coded code guardrails** against historical logs, and prompts for **human operator approval** before activating them.
+4. Future-proofs the cluster by dynamically caching newly resolved issues so subsequent occurrences hit the fast path without LLM calls.
 
 ---
 
 ## 2. Goals, Non-Goals & Anti-Goals
 
 ### 2.1 Goals
-- **Empirical Grounding**: Grounded in the 433,490-line LANL System 20 HPC dataset (`data/HPC.log`), respecting its 44 subsystem/event types and chronological evolution.
+- **Empirical Grounding**: Grounded in the 433,490-line HPC dataset (`data/HPC.log`), respecting its 44 subsystem/event types and chronological evolution.
 - **Two-Tier Architecture**:
   - **Fast Path**: Sub-millisecond deterministic parsing and rule matching.
   - **Slow Path**: Deep agentic reasoning with tool calling (`pydantic-ai`) for novel errors.
-- **Two-Agent Role Separation**:
-  - **Real-Time SRE Agent**: Immediate operator triage, root-cause explanation, and actionable remediation with citations.
-  - **Post-Mortem Rule Agent**: Pattern consolidation across incident clusters, candidate rule generation, and regression validation.
-- **Hard-Coded Safety Guardrails**: Zero tolerance for false positives on normal telemetry; strict code-level rejection of dangerous or overly broad patterns before human review.
-- **Human-in-the-Loop**: Explicit operator sign-off before committing newly learned rules into the active fast path (with an automated `--auto-approve` flag for headless CI/tests).
+- **Dynamic Resolution Caching**: When an unseen error is resolved by the SRE agent, its structured resolution is cached in the Rule Engine for instant, zero-cost retrieval on future occurrences.
 - **Incident Burst Debouncing**: In-flight deduplication buffer ensuring rapid bursts of identical novel errors do not flood the LLM API with redundant calls.
 - **Strict Code Quality**: Passes Python 3.12+ `ruff check`, `ruff format`, and `ty check`.
 
 ### 2.2 Non-Goals
-- **Live Distributed Ingestion**: Per `instructions.md`, data ingestion infrastructure (Kafka, Fluentbit, ClickHouse/Snowflake) is diagrammed and architected in the design/report, not deployed as running background infrastructure.
+- **Live Distributed Ingestion**: Per `instructions.md`, data ingestion infrastructure is diagrammed and architected in the design/report, not deployed as running background infrastructure.
 - **Custom DSL Compiler**: No custom parser/AST engine needed; rules are declarative Python/Pydantic schemas with regex and filter guards.
-- **Unbounded Auto-Deployment**: No autonomous self-modification of production rules without passing hard-coded regression tests and receiving operator approval.
 
 ### 2.3 Anti-Goals
 - **LLM-on-Every-Log**: Never send high-volume routine heartbeats (`ambient=36`, `normal`, `Link ok`) to an LLM.
@@ -73,9 +70,9 @@ Because `HPC.log` is officially unlabeled in Loghub (`N.A.` for anomalies), the 
 ```
 +---------------------------------------------------------------------------------+
 |                       1. Ingestion Architecture (Design)                        |
-|   HPC Nodes/Switches -> Fluentbit/Vector -> Kafka Buffer -> Analytical Store    |
+|   Cluster Nodes -> Log Collectors -> Distributed Message Queue -> Data Lake    |
 +---------------------------------------------------------------------------------+
-                                       |
+                                       | (Consume message queue)
                                        v
 +---------------------------------------------------------------------------------+
 |                       2. Stream Triage & Rule Engine (Fast Path)                |
@@ -84,6 +81,17 @@ Because `HPC.log` is officially unlabeled in Loghub (`N.A.` for anomalies), the 
 |       |--> [Hit]  -> Immediate Vetted Resolution (Sub-ms, $0)                   |
 |       |--> [Miss] -> Debounce & In-Flight Buffer -> Hand off to SRE Agent       |
 +---------------------------------------------------------------------------------+
+                                       |
+                                       v
++---------------------------------------------------------------------------------+
+|                       3. Real-Time SRE Agent (Online Slow Path)                 |
+|   Pydantic-AI Agent (NVIDIA NIM) + Subsystem Documentation Tools                |
+|   -> Queries daemon manuals, runbooks, error code lookup                        |
+|   -> Produces ProblemResolution: Summary, Root Cause, Severity, Steps, Citations|
+|   -> Automatically caches resolution into Rule Engine Cache (Future-Proofing)   |
+|   -> Delivers remediation to Operator & logs incident                           |
++---------------------------------------------------------------------------------+
+```
                                        |
                                        v
 +---------------------------------------------------------------------------------+
