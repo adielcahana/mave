@@ -1,8 +1,7 @@
-"""Tests for Stream Pipeline Orchestrator and unified CLI."""
+"""Tests for Pipeline Orchestrator and unified CLI."""
 
-import asyncio
-from collections.abc import AsyncIterator
-from typing import Any
+import shutil
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -12,16 +11,17 @@ from main import main, run_demo, run_evaluate
 from src.agent import ProblemResolution, create_agent
 from src.config import Settings
 from src.pipeline import LogPipeline, PipelineResult
-from src.rules.engine import RuleTreeEngine
-from src.rules.normalizer import parse_log_line
 
 
 @pytest.fixture
-def test_settings() -> Settings:
+def test_settings(tmp_path: Path) -> Settings:
+    rules_file = tmp_path / "rules.json"
+    shutil.copyfile("rules/rules.json", rules_file)
     return Settings(
         base_url="https://test.nvidia.com/v1",
         api_key="test-key",
         model_name="openai/gpt-oss-20b",
+        rules_path=str(rules_file),
     )
 
 
@@ -103,54 +103,8 @@ async def test_pipeline_dynamic_cache_learning(
 
 
 @pytest.mark.anyio
-async def test_pipeline_burst_deduplication(
-    test_settings: Settings,
-    mock_resolution: ProblemResolution,
-) -> None:
-    """Verify burst of 10 novel errors results in only 1 agent call and 9 attached/cached."""
-    call_count = 0
-
-    async def slow_analyze_log(*args: Any, **kwargs: Any) -> ProblemResolution:
-        nonlocal call_count
-        call_count += 1
-        # Add slight delay so concurrent tasks overlap in execution
-        await asyncio.sleep(0.05)
-        return mock_resolution
-
-    rule_engine = RuleTreeEngine()  # Empty engine, no pre-configured rules
-    pipeline = LogPipeline(rule_engine=rule_engine, settings=test_settings)
-
-    burst_line = (
-        "160000 node-101 Infiniband link_flap 1074220000 1 "
-        "IB subnet manager link flap detected on hca-1"
-    )
-    lines = [burst_line] * 10
-
-    with patch("src.pipeline.analyze_log", side_effect=slow_analyze_log):
-        results = await asyncio.gather(*(pipeline.process_log(line) for line in lines))
-
-    # Exactly 1 agent call must be made across the entire burst
-    assert call_count == 1
-
-    agent_resolved = [r for r in results if r.status == "AGENT_RESOLVED"]
-    attached_or_cached = [r for r in results if r.status in ("IN_FLIGHT_ATTACHED", "FAST_PATH_HIT")]
-
-    assert len(agent_resolved) == 1
-    assert len(attached_or_cached) == 9
-
-    # Total cost should reflect only the single LLM invocation
-    total_cost = sum(r.cost_usd for r in results)
-    assert pytest.approx(total_cost, rel=1e-3) == 0.0015
-
-    # All returned resolutions must match
-    for r in results:
-        assert r.resolution is not None
-        assert r.resolution.error_summary == mock_resolution.error_summary
-
-
-@pytest.mark.anyio
-async def test_pipeline_process_stream(test_settings: Settings) -> None:
-    """Verify processing sync and async log streams."""
+async def test_pipeline_process_logs(test_settings: Settings) -> None:
+    """Verify processing multiple log lines."""
     pipeline = LogPipeline(settings=test_settings)
 
     lines = [
@@ -158,27 +112,11 @@ async def test_pipeline_process_stream(test_settings: Settings) -> None:
         "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )",
     ]
 
-    # Test sync iterable
-    results: list[PipelineResult] = []
-    async for item in pipeline.process_stream(lines):
-        results.append(item)
+    results = await pipeline.process_logs(lines)
 
     assert len(results) == 2
     assert results[0].status == "TELEMETRY_FILTERED"
     assert results[1].status == "FAST_PATH_HIT"
-
-    # Test async iterable
-    async def async_generator() -> AsyncIterator[str]:
-        for line in lines:
-            yield line
-
-    async_results: list[PipelineResult] = []
-    async for item in pipeline.process_stream(async_generator()):
-        async_results.append(item)
-
-    assert len(async_results) == 2
-    assert async_results[0].status == "TELEMETRY_FILTERED"
-    assert async_results[1].status == "FAST_PATH_HIT"
 
 
 def test_cli_evaluate_runs_and_prints(capsys: pytest.CaptureFixture[str]) -> None:
@@ -196,7 +134,7 @@ async def test_cli_demo_runs_cleanly(
     mock_resolution: ProblemResolution,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Verify run_demo executes all 5 stages cleanly."""
+    """Verify run_demo executes cleanly."""
     with patch("src.pipeline.analyze_log", return_value=mock_resolution):
         await run_demo()
     captured = capsys.readouterr().out
@@ -204,7 +142,6 @@ async def test_cli_demo_runs_cleanly(
     assert "[Stage 2] Sub-Millisecond Rule Tree Fast-Path" in captured
     assert "[Stage 3] Slow-Path SRE Agent Escalation" in captured
     assert "[Stage 4] Dynamic Cache Hit on Second Occurrence" in captured
-    assert "[Stage 5] In-Flight Burst Storm Deduplication" in captured
     assert "DEMONSTRATION COMPLETE" in captured
 
 
@@ -216,91 +153,3 @@ def test_cli_main_dispatch() -> None:
     ):
         main()
         mock_eval.assert_called_once()
-
-
-@pytest.mark.anyio
-async def test_pipeline_follower_recovers_from_leader_cancellation(
-    test_settings: Settings,
-    mock_resolution: ProblemResolution,
-) -> None:
-    """Verify follower coroutines recover gracefully if leader task is cancelled."""
-    rule_engine = RuleTreeEngine()
-    pipeline = LogPipeline(rule_engine=rule_engine, settings=test_settings)
-    error_line = "190000 node-10 custom_daemon fatal 1074220000 1 unexpected core failure"
-
-    leader_started = asyncio.Event()
-    leader_cancel = asyncio.Event()
-
-    async def flaky_analyze_log(*args: Any, **kwargs: Any) -> ProblemResolution:
-        if not leader_started.is_set():
-            leader_started.set()
-            # Wait until follower attaches, then simulate cancellation
-            await leader_cancel.wait()
-            raise asyncio.CancelledError("Leader task cancelled")
-        # Follower fallback call succeeds
-        return mock_resolution
-
-    with patch("src.pipeline.analyze_log", side_effect=flaky_analyze_log):
-        # Start leader task
-        leader_task = asyncio.create_task(pipeline.process_log(error_line))
-        await leader_started.wait()
-
-        # Start follower task which will attach to the in-flight leader future
-        follower_task = asyncio.create_task(pipeline.process_log(error_line))
-        # Yield control so follower enters in-flight attach check
-        await asyncio.sleep(0.01)
-
-        # Trigger leader cancellation
-        leader_cancel.set()
-
-        # Leader raises CancelledError
-        with pytest.raises(asyncio.CancelledError):
-            await leader_task
-
-        # Follower should recover gracefully, calling analyze_log itself
-        follower_result = await follower_task
-
-        assert follower_result.status == "AGENT_RESOLVED"
-        assert follower_result.cost_usd > 0.0
-        assert follower_result.resolution is not None
-        assert follower_result.resolution.error_summary == mock_resolution.error_summary
-
-        # The resolution should also be cached in rule_engine now
-        event = parse_log_line(error_line)
-        assert pipeline.rule_engine.match(event) is not None
-
-
-@pytest.mark.anyio
-async def test_pipeline_burst_cache_ttl_and_eviction(
-    test_settings: Settings,
-    mock_resolution: ProblemResolution,
-) -> None:
-    """Verify burst cache respects TTL window and capacity ceiling."""
-    pipeline = LogPipeline(
-        settings=test_settings,
-        burst_window_seconds=0.05,
-        max_burst_entries=2,
-    )
-
-    with patch("src.pipeline.analyze_log", return_value=mock_resolution):
-        # 1. First event recorded
-        line1 = "200001 node-1 sub1 err 1000000000 1 error 1"
-        res1 = await pipeline.process_log(line1)
-        assert res1.status == "AGENT_RESOLVED"
-
-        # 2. Second event recorded (burst cache has 2 entries)
-        line2 = "200002 node-2 sub2 err 1000000001 1 error 2"
-        res2 = await pipeline.process_log(line2)
-        assert res2.status == "AGENT_RESOLVED"
-        assert len(pipeline._recent_bursts) <= 2
-
-        # 3. Third event recorded (should evict oldest due to max_burst_entries=2)
-        line3 = "200003 node-3 sub3 err 1000000002 1 error 3"
-        res3 = await pipeline.process_log(line3)
-        assert res3.status == "AGENT_RESOLVED"
-        assert len(pipeline._recent_bursts) <= 2
-
-        # 4. Wait for TTL expiry (>0.05s)
-        await asyncio.sleep(0.06)
-        pipeline._cleanup_bursts()
-        assert len(pipeline._recent_bursts) == 0

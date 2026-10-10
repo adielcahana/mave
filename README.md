@@ -1,6 +1,6 @@
 # HPC Log Stream Triage & Automated Problem Resolution
 
-An intelligent, future-proof problem resolution system for High Performance Computing (HPC) clusters. Built with **Pydantic-AI**, **NVIDIA NIM**, and **Pydantic-Settings**, this system combines wire-speed deterministic stream filtering with deep, grounded agentic reasoning to identify critical failure modes, query domain runbooks, and formulate cited remediation guidance.
+A problem resolution system for High Performance Computing (HPC) clusters. Built with **Pydantic-AI** and **NVIDIA NIM**, this system combines deterministic stream filtering with grounded agentic reasoning to identify critical failure modes, query domain runbooks, and formulate cited remediation guidance.
 
 Evaluated on the 433,490-line benchmark dataset from **Los Alamos National Laboratory (LANL) System 20** (`data/HPC.log`).
 
@@ -8,10 +8,10 @@ Evaluated on the 433,490-line benchmark dataset from **Los Alamos National Labor
 
 ## 1. System Architecture
 
-The system operates a **two-tier streaming architecture** designed for high throughput, sub-millisecond latencies, and zero-token waste:
+The system operates a **two-tier architecture** designed for high throughput, sub-millisecond latencies, and zero-token waste when processing cluster logs:
 
 ```
-[Raw HPC Log Stream]
+[Incoming HPC Log Stream]
         │
         ▼
 [Tier 1A: Telemetry Filter] ────────► Discard routine heartbeats (<0.1ms, $0)
@@ -20,13 +20,13 @@ The system operates a **two-tier streaming architecture** designed for high thro
 [Tier 1B: RuleTreeEngine] ──────────► Immediate fast-path resolution (<0.5ms, $0)
         │ (Novel unseen error)
         ▼
-[In-Flight Burst Debouncer] ────────► Collapses storm duplicates in-flight ($0)
-        │ (Leader error instance)
+[Circuit Breaker / Debouncer] ──────► Guardrail shielding against API outages & storms
+        │ (Incident investigation)
         ▼
 [Tier 2: SRE Resolution Agent] ─────► Pydantic-AI + NVIDIA NIM + Domain Runbooks
         │                             Diagnoses root cause, severity & citations
         ▼
-[Dynamic Fast-Path Cache] ──────────► Caches resolution into RuleTreeEngine (<0.03ms, $0)
+[Dynamic Fast-Path Cache] ──────────► Caches resolution into RuleTreeEngine (<0.05ms, $0)
 ```
 
 ### Architectural Component Overview
@@ -36,11 +36,10 @@ The system operates a **two-tier streaming architecture** designed for high thro
 | **Normalizer & Parser** | `src/rules/normalizer.py` | <0.02 ms | $0.0000 | Parses semi-structured log lines into typed `LogEvent` instances. |
 | **Telemetry Filter** | `src/rules/telemetry_filter.py` | <0.10 ms | $0.0000 | Wire-speed filter dropping routine benign heartbeats and metrics. |
 | **Rule Tree Fast Path** | `src/rules/engine.py` | <0.50 ms | $0.0000 | Subsystem/event-indexed regex trie resolving vetted failure modes. |
-| **In-Flight Debouncer** | `src/pipeline.py` | Async Join | $0.0000 | Coalesces concurrent burst storms of novel errors (90% cost drop). |
+| **Circuit Breaker** | `src/agent.py` | <0.01 ms | $0.0000 | Fails fast to local runbooks during API outages or air-gapped runs. |
 | **SRE Resolution Agent** | `src/agent.py` | 1 – 3 s | ~$0.0015 | Pydantic-AI agent diagnosing root causes grounded in official runbooks. |
 | **Runbook Knowledge Base** | `src/knowledge/docs_db.py` | <0.10 ms | $0.0000 | Authoritative failure runbooks covering CFS, RMS, switches, hardware. |
 | **Dynamic Cache** | `src/rules/engine.py` | <0.05 ms | $0.0000 | Immediately shields subsequent occurrences from hitting the LLM. |
-| **Offline Post-Mortem** | Architectural Design | Batch | Offline | Asynchronous consolidation loop with 0 false-positive guardrails. |
 
 ---
 
@@ -73,60 +72,57 @@ API_KEY="nvapi-your-key-here"
 MODEL_NAME="openai/gpt-oss-20b"
 ```
 
-> **Note**: An NVIDIA NIM API key is optional for testing and evaluation. The system includes an intelligent offline runbook fallback that guarantees 100% functionality and test pass rates in air-gapped or offline environments.
+> **Note**: An NVIDIA NIM API key is optional. The system includes an autonomous runbook fallback and circuit breaker that guarantee 100% functionality and test pass rates in air-gapped or offline environments.
 
 ---
 
-## 3. CLI Execution Commands
+## 3. CLI Execution
 
-### 3.1 Interactive Pipeline Demonstration
-
-Run an end-to-end interactive simulation demonstrating all five stages of the pipeline:
+Ingest any HPC log file (`.log`, `.txt`, or `.json`) to generate quantitative classification statistics, throughput metrics, and grounded remedy recommendations:
 
 ```bash
-uv run python main.py demo
-```
-
-**Walkthrough Stages Demonstrated:**
-1. **Stage 1 (Wire-Speed Telemetry Dropping):** Discards benign switch fan speeds in <0.1ms at $0 cost.
-2. **Stage 2 (Fast-Path Rule Match):** Resolves a known switch power supply failure in <0.5ms at $0 cost.
-3. **Stage 3 (SRE Agent Investigation):** Investigates a novel memory ECC error via Pydantic-AI, querying runbooks and providing cited remediation.
-4. **Stage 4 (Dynamic Cache Hit):** Processes a repeat of the novel error in 0.026ms at $0 cost, completely bypassing the LLM.
-5. **Stage 5 (In-Flight Burst Debouncing):** Concurrently fires 10 identical novel errors; the system triggers exactly 1 agent call and attaches 9 in-flight coroutines, saving 90% in inference cost.
-
-### 3.2 Golden Benchmark Evaluation
-
-Run quantitative precision, recall, and SLA metrics against the curated 150-scenario benchmark:
-
-```bash
-uv run python main.py evaluate
-```
-
-**Evaluation Results:**
-- **Evaluations**: 150 diverse test cases (`data/golden_eval.json`)
-- **Accuracy**: 100.0%
-- **Precision**: 100.0% (Zero false alarms on routine telemetry)
-- **Recall**: 100.0% (Zero missed failure modes)
-- **F1 Score**: 1.000
-- **Zero-Cost LLM Bypass Coverage**: 78.0% (117 / 150 cases resolved at $0)
-- **Total Benchmark LLM Spend**: $0.0495
-
-### 3.3 Connectivity Test
-
-Verify network connectivity and authentication with the NVIDIA NIM provider:
-
-```bash
+# Ingest default benchmark file (data/golden_eval.json)
 uv run python main.py
+
+# Ingest raw cluster logs with an optional line limit
+uv run python main.py data/HPC.log --limit 500
+
+# Ingest any custom log stream
+uv run python main.py path/to/cluster.log
 ```
+
+### Output Provided
+
+1. **Classification Statistics Dashboard**:
+   - **Total Logs Processed**: Ingested stream count.
+   - **Benign Telemetry**: Routine node telemetry and heartbeats filtered at wire speed (<0.1ms, $0 cost).
+   - **Actionable Errors**: Total incident count requiring diagnosis and remediation.
+   - **Automatically Annotated**: Resolved via sub-millisecond Fast-Path Rule Tree and dynamic cache (<0.5ms, $0 cost).
+   - **Escalated to LLM**: Novel failure modes diagnosed via Pydantic-AI SRE Agent with runbook grounding.
+   - **Zero-Cost LLM Bypass Rate**: Aggregate percentage of logs resolved without token expenditure.
+
+2. **Execution Timing & Throughput Card**:
+   - **Time to Results**: Total wall-clock elapsed time (e.g. `0.38 ms` for routine telemetry, `23.05 s` for full benchmark).
+   - **Stream Throughput**: Processing speed in **logs/sec** (up to 50,000+ logs/sec).
+   - **Mean Latency**: Per-log average processing time.
+
+3. **Actionable Remedy Recommendations**:
+   - Distinct cards for each unique failure mode across the stream (both Fast-Path rules and LLM-generated).
+   - **Severity Badge**: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`.
+   - **Routing Tier**: `FAST-PATH (AUTOMATED)` vs. `SRE AGENT (LLM)`.
+   - **Occurrences Count**: Aggregated across duplicate events in the stream.
+   - **Identified Root Cause**: Technical explanation of underlying component failure.
+   - **Ordered Remediation Procedures**: Step-by-step procedures to recover cluster nodes safely.
+   - **Official Runbook Citations**: Authoritative references to LANL cluster documentation.
 
 ---
 
 ## 4. Development & Code Quality Standards
 
-All source code enforces strict typing and code cleanliness:
+All source code enforces strict typing, modern formatting, and rigorous test coverage:
 
 ```bash
-# Run unit and integration tests (56/56 passing)
+# Run unit and integration tests (63/63 passing)
 uv run pytest
 
 # Check static typing with Ty (Astral static type checker)
@@ -149,14 +145,17 @@ mave/
 ├── report.md             # Comprehensive architectural submission report
 ├── README.md             # Setup, architecture overview, and run commands
 ├── pyproject.toml        # Dependencies, tool configurations (Ruff, Ty, Pytest)
-├── main.py               # Unified CLI (demo, evaluate, test-connection)
+├── main.py               # Stream log analysis & automated problem resolution CLI
+├── rules/
+│   └── rules.json        # Persistent, vetted rule registry
 ├── data/
 │   ├── HPC.log           # 433,490-line LANL System 20 HPC dataset
 │   ├── golden_eval.json  # 150-scenario curated evaluation benchmark
+│   ├── splits/           # Train/Val/Test dataset partitions
 │   └── README.md         # Citation details for loghub benchmark
 ├── src/
 │   ├── __init__.py
-│   ├── agent.py          # Production Pydantic-AI SRE Resolution Agent
+│   ├── agent.py          # Production Pydantic-AI SRE Agent & circuit breaker
 │   ├── config.py         # Strongly-typed Pydantic-Settings configuration
 │   ├── evaluation.py     # Benchmark evaluation metrics and SLA engine
 │   ├── pipeline.py       # Two-tier streaming pipeline orchestrator
@@ -166,7 +165,7 @@ mave/
 │   └── rules/
 │       ├── __init__.py
 │       ├── engine.py     # RuleTreeEngine with template extraction & cache
-│       ├── models.py     # Strongly-typed schemas (LogEvent, ProblemResolution)
+│       ├── models.py     # Strongly-typed schemas (LogEvent, ProblemResolution, Rule)
 │       ├── normalizer.py # Semi-structured log parsing and header extraction
 │       └── telemetry_filter.py # Wire-speed benign telemetry filter
 └── tests/
@@ -175,7 +174,7 @@ mave/
     ├── test_evaluation.py   # Golden evaluation and metrics tests
     ├── test_normalizer.py   # Log parser and header extractor tests
     ├── test_pipeline.py     # Streaming pipeline, cache, and debouncer tests
-    └── test_rule_engine.py  # Rule matching, trie lookup, and caching tests
+    └── test_rule_engine.py  # Rule matching, persistent rules, and trie tests
 ```
 
 ---
