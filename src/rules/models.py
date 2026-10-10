@@ -1,9 +1,11 @@
 """Data models for HPC log events, rules, and problem resolutions."""
 
 import re
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr
+
+ValidationStatus = Literal["PENDING", "VALIDATED", "REJECTED"]
 
 
 class ProblemResolution(BaseModel):
@@ -25,6 +27,17 @@ class ProblemResolution(BaseModel):
     )
 
 
+class ProblemResolutionWithRegex(ProblemResolution):
+    """Structured resolution schema with suggested log template regex for unparsed logs."""
+
+    suggested_log_template_regex: str = Field(
+        description=(
+            "Python regular expression with named capture groups to parse this unparsed "
+            "log format. MUST include named groups: (?P<subsystem>...) and (?P<message>...)."
+        ),
+    )
+
+
 class Rule(BaseModel):
     """Pre-configured rule for fast-path problem resolution."""
 
@@ -37,6 +50,14 @@ class Rule(BaseModel):
     )
     resolution: ProblemResolution = Field(
         description="ProblemResolution payload returned upon match"
+    )
+    human_validated: bool = Field(
+        default=False,
+        description="Whether the rule has been verified by a human operator",
+    )
+    validation_status: ValidationStatus = Field(
+        default="VALIDATED",
+        description="Validation lifecycle state ('PENDING', 'VALIDATED', 'REJECTED')",
     )
 
     _compiled: re.Pattern[str] | None = PrivateAttr(default=None)
@@ -69,6 +90,10 @@ class LogEvent(BaseModel):
     flag: int = Field(default=0, description="Log flag or status code")
     message: str = Field(default="", description="Normalized message body")
     raw: str = Field(default="", description="Original unparsed log line")
+    is_unparsed: bool = Field(
+        default=False,
+        description="Whether log was unparsed by registered templates",
+    )
 
     def __init__(
         self,
@@ -80,9 +105,20 @@ class LogEvent(BaseModel):
         flag: int = 0,
         message: str = "",
         raw: str = "",
+        is_unparsed: bool = False,
         **data: Any,
     ) -> None:
-        if log_id or node or subsystem or event_type or timestamp or flag or message or raw:
+        if (
+            log_id
+            or node
+            or subsystem
+            or event_type
+            or timestamp
+            or flag
+            or message
+            or raw
+            or is_unparsed
+        ):
             data.setdefault("log_id", log_id)
             data.setdefault("node", node)
             data.setdefault("subsystem", subsystem)
@@ -91,4 +127,5 @@ class LogEvent(BaseModel):
             data.setdefault("flag", flag)
             data.setdefault("message", message)
             data.setdefault("raw", raw)
+            data.setdefault("is_unparsed", is_unparsed)
         super().__init__(**data)

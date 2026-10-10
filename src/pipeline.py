@@ -72,9 +72,7 @@ class LogPipeline:
         )
         self.agent_cost_usd: float = agent_cost_usd
         self.template_registry: LogTemplateRegistry = (
-            template_registry
-            if template_registry is not None
-            else LogTemplateRegistry()
+            template_registry if template_registry is not None else LogTemplateRegistry()
         )
 
     async def process_log(self, raw_line: str) -> PipelineResult:

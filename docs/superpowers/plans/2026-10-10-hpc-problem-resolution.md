@@ -431,9 +431,7 @@ from src.rules.engine import RuleTreeEngine
 async def test_pipeline_filters_telemetry():
     engine = RuleTreeEngine()
     pipeline = LogPipeline(rule_engine=engine, agent=None)
-    result = await pipeline.process_log(
-        "2560243 gige3 gige temperature 1073198499 1 normal"
-    )
+    result = await pipeline.process_log("2560243 gige3 gige temperature 1073198499 1 normal")
     assert result.status == "TELEMETRY_FILTERED"
     assert result.resolution is None
 

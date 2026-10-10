@@ -29,7 +29,7 @@ The project provides a starter Pydantic-AI agent connecting to NVIDIA NIM:
 - **Module**: `src/agent.py`
 - **Configuration**: Loaded via `src/config.py` using `pydantic-settings` from `.env`.
 - **Model Client**: `AsyncOpenAI` pointing to the NVIDIA NIM endpoint (`BASE_URL` and `API_KEY`).
-- **Entry Point**: `main.py` verifies connectivity to the NVIDIA NIM provider.
+- **Entry Point**: `main.py` runs the unified HPC streaming pipeline and automated problem resolution engine.
 
 ---
 
@@ -42,7 +42,7 @@ mave/
 ├── AGENTS.md             # Project problem statement, frameworks, and setup overview
 ├── instructions.md       # Assignment specification and guidelines
 ├── pyproject.toml        # Dependencies, tool configurations (Ruff & Ty)
-├── main.py               # Minimal entry point testing connection to NVIDIA NIM
+├── main.py               # Unified streaming pipeline and benchmark evaluation entry point
 ├── data/
 │   ├── HPC.log           # Los Alamos National Labs HPC log dataset
 │   └── README.md         # Citation details for loghub benchmark

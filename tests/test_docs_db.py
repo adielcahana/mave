@@ -1,9 +1,15 @@
 """Tests for LANL HPC subsystem knowledge base and runbooks."""
 
+import json
+from pathlib import Path
+
+import pytest
+
 from src.knowledge.docs_db import (
     RunbookEntry,
     get_all_runbooks,
     list_known_subsystems,
+    load_runbooks,
     query_subsystem_docs,
 )
 
@@ -168,3 +174,50 @@ def test_runbook_entry_immutability_and_tuple_types() -> None:
     )
     assert isinstance(entry.remediation_steps, tuple)
     assert isinstance(entry.keywords, tuple)
+
+
+def test_runbooks_json_file_exists_and_loads() -> None:
+    path = Path("resources/runbooks.json")
+    assert path.is_file(), "resources/runbooks.json must exist"
+
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert isinstance(data, list)
+    assert len(data) >= 15
+    for item in data:
+        for required_field in (
+            "subsystem",
+            "scenario",
+            "root_cause",
+            "remediation_steps",
+            "citation",
+            "keywords",
+            "event_type",
+        ):
+            assert required_field in item, f"Missing field {required_field} in entry {item}"
+
+
+def test_load_runbooks_custom_path_and_not_found(tmp_path: Path) -> None:
+    custom_file = tmp_path / "custom_runbooks.json"
+    dummy_data = [
+        {
+            "subsystem": "test_system",
+            "scenario": "Custom test scenario",
+            "root_cause": "Test root cause",
+            "remediation_steps": ["Step 1", "Step 2"],
+            "citation": "[LANL HPC Runbook: test-custom-v1.0]",
+            "keywords": ["test", "custom"],
+            "event_type": "test_event",
+        }
+    ]
+    custom_file.write_text(json.dumps(dummy_data), encoding="utf-8")
+
+    loaded = load_runbooks(custom_file)
+    assert len(loaded) == 1
+    assert loaded[0].subsystem == "test_system"
+    assert loaded[0].scenario == "Custom test scenario"
+    assert loaded[0].remediation_steps == ("Step 1", "Step 2")
+
+    with pytest.raises(FileNotFoundError):
+        load_runbooks(tmp_path / "nonexistent.json")

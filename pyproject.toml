@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.14.0",
     "pydantic-ai>=2.55.0",
     "pydantic-settings>=2.15.0",
+    "rich>=13.0.0",
 ]
 
 [dependency-groups]

@@ -1,4 +1,8 @@
+import json
 import time
+from pathlib import Path
+
+import pytest
 
 from src.agent import ProblemResolution
 from src.rules.engine import RuleTreeEngine, extract_template
@@ -295,3 +299,169 @@ def test_lru_cache_capacity_bound_and_eviction():
     matched_3 = engine.match(raw_3)
     assert matched_3 is not None
     assert matched_3.error_summary == "Error 3"
+
+
+def test_persistent_rules_file_loading_and_dumping(tmp_path: Path) -> None:
+    """Verify loading from JSON file, adding rules, auto-dumping, and human_validated flag."""
+    rules_file = tmp_path / "rules.json"
+
+    # 1. Initialize engine with defaults pointing to new file
+    engine = RuleTreeEngine.with_defaults(rules_path=rules_file)
+    assert engine.rule_count == 5
+    assert rules_file.is_file()
+
+    # Verify seed rules are marked human_validated=True and validation_status='VALIDATED'
+    psu_rule = engine.get_rule("RULE-PSU-01")
+    assert psu_rule is not None
+    assert psu_rule.human_validated is True
+    assert psu_rule.validation_status == "VALIDATED"
+
+    # 2. Add a new rule with persist=True
+    new_res = ProblemResolution(
+        error_summary="Thermal trip detected",
+        root_cause="CPU overheating above 95C",
+        severity="CRITICAL",
+        remediation_steps=["Throttle node", "Check cooling loop"],
+        citations_and_reasons=["Thermal manual"],
+    )
+    new_rule = Rule(
+        rule_id="RULE-THERMAL-01",
+        subsystem="unix.hw",
+        event_type="thermal",
+        pattern=r"CPU thermal trip initiated",
+        resolution=new_res,
+        human_validated=False,
+        validation_status="VALIDATED",
+    )
+    engine.add_rule(new_rule, persist=True)
+
+    # 3. Verify file on disk contains the new rule
+    with open(rules_file, encoding="utf-8") as f:
+        data = json.load(f)
+    rule_ids = [r["rule_id"] for r in data]
+    assert "RULE-THERMAL-01" in rule_ids
+    saved_thermal = next(r for r in data if r["rule_id"] == "RULE-THERMAL-01")
+    assert saved_thermal["human_validated"] is False
+    assert saved_thermal["validation_status"] == "VALIDATED"
+
+    # 4. A fresh engine pointing to the same file loads all rules including the new one
+    engine2 = RuleTreeEngine(rules_path=rules_file)
+    assert engine2.rule_count == 6
+    matched = engine2.match("100 node-1 unix.hw thermal 1000000000 1 CPU thermal trip initiated")
+    assert matched is not None
+    assert matched.error_summary == "Thermal trip detected"
+
+
+def test_benign_validation_zero_false_positive_guardrail() -> None:
+    """Verify validate_rule_against_benign catches and rejects rules matching benign telemetry."""
+    engine = RuleTreeEngine()
+
+    # Unsafe rule matching routine fan telemetry
+    unsafe_rule = Rule(
+        rule_id="RULE-UNSAFE-FAN",
+        subsystem="switch_module",
+        event_type="fan",
+        pattern=r"Fan speeds.*",
+        resolution=ProblemResolution(
+            error_summary="Fan emergency",
+            root_cause="Fan error",
+            severity="CRITICAL",
+        ),
+    )
+    assert engine.validate_rule_against_benign(unsafe_rule) is False
+
+    # Safe rule matching specific hardware panic
+    safe_rule = Rule(
+        rule_id="RULE-SAFE-PANIC",
+        subsystem="kernel",
+        event_type="panic",
+        pattern=r"kernel panic: uncorrectable machine check",
+        resolution=ProblemResolution(
+            error_summary="Kernel panic",
+            root_cause="MCE crash",
+            severity="CRITICAL",
+        ),
+    )
+    assert engine.validate_rule_against_benign(safe_rule) is True
+
+
+@pytest.mark.anyio
+async def test_async_benign_validation_and_pending_state(tmp_path: Path) -> None:
+    """Verify novel rule is immediately matchable in PENDING state and transitions to VALIDATED."""
+    rules_file = tmp_path / "rules.json"
+    engine = RuleTreeEngine.with_defaults(rules_path=rules_file)
+
+    novel_res = ProblemResolution(
+        error_summary="InfiniBand HCA firmware timeout",
+        root_cause="HCA controller lockup",
+        severity="HIGH",
+        remediation_steps=["Reset HCA PCI bus"],
+        citations_and_reasons=["InfiniBand guide"],
+    )
+    raw_event = "150000 node-101 infiniband error 1074220000 1 HCA firmware timeout on port 1"
+
+    # Create novel rule: immediately registers with PENDING state
+    rule = engine.create_rule_from_resolution(
+        raw_event,
+        novel_res,
+        rule_id="RULE-HCA-TIMEOUT-01",
+        auto_validate_async=True,
+    )
+    assert rule.validation_status == "PENDING"
+    assert rule.human_validated is False
+
+    # Immediate match during PENDING state: does NOT block!
+    matched_pending = engine.match(raw_event)
+    assert matched_pending is not None
+    assert matched_pending.error_summary == "InfiniBand HCA firmware timeout"
+
+    # Wait for background validation to finish
+    is_valid = await engine.wait_for_validation(rule.rule_id)
+    assert is_valid is True
+    assert rule.validation_status == "VALIDATED"
+
+    # Disk file is updated with VALIDATED status
+    with open(rules_file, encoding="utf-8") as f:
+        data = json.load(f)
+    saved = next(r for r in data if r["rule_id"] == "RULE-HCA-TIMEOUT-01")
+    assert saved["validation_status"] == "VALIDATED"
+    assert saved["human_validated"] is False
+
+
+@pytest.mark.anyio
+async def test_async_benign_validation_rejection_deactivation(tmp_path: Path) -> None:
+    """Verify rule that matches benign cases gets REJECTED and deactivated from tree matching."""
+    rules_file = tmp_path / "rules.json"
+    engine = RuleTreeEngine.with_defaults(rules_path=rules_file)
+
+    bad_res = ProblemResolution(
+        error_summary="False alarm on fan",
+        root_cause="Bogus rule",
+        severity="CRITICAL",
+    )
+    # A log line whose extracted template would falsely match routine fan telemetry
+    raw_bad_event = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+
+    bad_rule = engine.create_rule_from_resolution(
+        raw_bad_event,
+        bad_res,
+        rule_id="RULE-BAD-FAN-01",
+        auto_validate_async=True,
+    )
+    assert bad_rule.validation_status == "PENDING"
+
+    # Wait for async validation to execute
+    is_valid = await engine.wait_for_validation(bad_rule.rule_id)
+    assert is_valid is False
+    assert bad_rule.validation_status == "REJECTED"
+
+    # Rule is deactivated: matching tree must NOT match this rejected rule anymore!
+    assert engine.match_rule(raw_bad_event) is None
+
+    # Status on disk is marked as REJECTED
+    with open(rules_file, encoding="utf-8") as f:
+        data = json.load(f)
+    saved = next(r for r in data if r["rule_id"] == "RULE-BAD-FAN-01")
+    assert saved["validation_status"] == "REJECTED"

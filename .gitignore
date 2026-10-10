@@ -25,3 +25,6 @@ dist/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Datasets / splits
+data/splits/
