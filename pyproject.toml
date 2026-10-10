@@ -28,3 +28,8 @@ ignore = []
 
 [tool.ty]
 # Configuration for ty type checker
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
