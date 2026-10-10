@@ -1,10 +1,13 @@
-# HPC Log Problem Resolution & Dynamic Rule Learning Implementation Plan
+# HPC Log Problem Resolution System Implementation Plan (Lean Scope)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build an end-to-end HPC log problem resolution system combining wire-speed telemetry filtering, a fast-path Rule Tree engine, an enriched Pydantic-AI SRE resolution agent, and a post-mortem rule consolidation agent with hard-coded code guardrails.
+**Goal:** Build a lean, high-performance problem resolution system for HPC logs that filters telemetry at wire speed, resolves known errors via a fast-path Rule Tree cache, invokes a Pydantic-AI SRE agent for novel errors with subsystem documentation tools, caches new resolutions for future-proofing, and documents the enterprise ingestion and post-mortem consolidation architecture in `report.md`.
 
-**Architecture:** A two-tier problem resolution pipeline where incoming logs are parsed and filtered for routine telemetry; recurring errors hit a fast-path rule cache for sub-millisecond, zero-cost resolution; novel errors route to a real-time Pydantic-AI SRE agent querying subsystem documentation; and an offline post-mortem agent synthesizes generalized rules verified against hard-coded telemetry guardrails and operator approval.
+**Architecture:** A two-tier pipeline:
+1. **Fast Path**: Raw logs are parsed into typed `LogEvent` records. Routine telemetry (`ambient=*`, `normal`, `running`, `Link ok`) is filtered instantly without LLM overhead. Actionable logs query an indexed Rule Tree cache for sub-millisecond, zero-cost resolution.
+2. **Slow Path**: Unseen errors route to a Pydantic-AI SRE agent equipped with a LANL HPC subsystem knowledge base tool. The agent produces structured, cited `ProblemResolution` outputs, which are automatically cached into the Rule Tree to ensure future-proofing.
+3. **Design-Only Architectures**: Enterprise ingestion (Kafka/Fluentbit/ClickHouse) and the offline Post-Mortem Rule Consolidation Agent are fully diagrammed and specified in `report.md`.
 
 **Tech Stack:** Python 3.12+, Pydantic-AI, Pydantic v2, AsyncOpenAI (NVIDIA NIM), Pytest, Ruff, Ty.
 
@@ -16,35 +19,35 @@
 
 | Component | Nature | Destination | Description |
 | :--- | :--- | :--- | :--- |
-| **Ingestion Pipeline** | **Design Only** | `report.md`, Architecture Diagrams | End-to-end Kafka, Fluentbit, and ClickHouse/Snowflake streaming architecture as explicitly directed in assignment instructions ("don't implement, just diagram"). |
-| **Log Normalizer & Telemetry Filter** | **Actual Code** | `src/rules/normalizer.py`, `src/rules/telemetry_filter.py` | High-speed regex/string parser separating benign telemetry (`ambient=*`, `normal`, `Link ok`) from actionable events. |
-| **Rule Engine & In-Flight Debouncer** | **Actual Code** | `src/rules/models.py`, `src/rules/engine.py`, `src/rules/debouncer.py` | Hierarchical `(subsystem, event)` Rule Tree cache and incident debouncer preventing redundant LLM calls during error storms. |
-| **Hard-Coded Safety Guardrails** | **Actual Code** | `src/guardrails.py` | Programmatic rejection of candidate rules causing false positives on baseline telemetry, ReDoS patterns, or missing incident recall. |
-| **Real-Time SRE Agent** | **Actual Code** | `src/sre_agent.py`, `src/knowledge/docs_db.py` | Pydantic-AI agent querying rich LANL HPC subsystem documentation to explain root causes and provide cited remediations. |
-| **Post-Mortem Consolidation Agent** | **Actual Code** | `src/post_mortem_agent.py` | Asynchronous agent with tools to inspect incident clusters, synthesize candidate rules, dry-run against historical logs, and request operator approval. |
-| **Evaluation Suite & Golden Benchmark** | **Actual Code & Data** | `data/golden_eval.json`, `tests/`, `main.py evaluate` | Curated evaluation dataset across failure and normal categories, computing Precision, Recall, and F1. |
-| **Interactive CLI & Unified Demo** | **Actual Code** | `main.py` | Unified CLI supporting interactive walkthrough (`demo`) and automated metrics benchmark (`evaluate`). |
-| **Submission Report & Run Instructions**| **Actual Docs** | `report.md`, `README.md` | Formal assignment submission report with design diagrams, thought process, and exact build/run instructions. |
+| **Ingestion Pipeline** | **Design Only** | `report.md` | Enterprise Kafka, Fluentbit, and ClickHouse/Snowflake streaming ingestion architecture diagram as explicitly instructed ("don't implement, just diagram"). |
+| **Post-Mortem Consolidation Agent** | **Design Only** | `report.md` | Offline multi-agent consolidation loop, cross-incident clustering, and human approval workflow diagrammed and documented in the submission report. |
+| **Log Normalizer & Telemetry Filter** | **Actual Code** | `src/rules/normalizer.py`, `src/rules/telemetry_filter.py` | Wire-speed parser separating routine telemetry from actionable events. |
+| **Rule Tree & Resolution Cache** | **Actual Code** | `src/rules/models.py`, `src/rules/engine.py` | Hierarchical `(subsystem, event)` fast-path matcher and dynamic resolution cache. |
+| **Subsystem Knowledge Base** | **Actual Code** | `src/knowledge/docs_db.py` | Domain runbooks covering the 44 LANL HPC subsystem failure modes. |
+| **Production SRE Agent** | **Actual Code** | `src/agent.py` | Pydantic-AI agent querying domain documentation and returning cited `ProblemResolution`. |
+| **Pipeline & In-Flight Burst Suppressor** | **Actual Code** | `src/pipeline.py` | Two-tier orchestrator with duplicate suppression for bursting error storms. |
+| **Golden Benchmark & Evaluation** | **Actual Code & Data** | `data/golden_eval.json`, `src/evaluation.py` | 150 diverse labeled logs measuring Precision, Recall, F1, and fast-path vs agent breakdown. |
+| **Unified CLI (`demo` & `evaluate`)** | **Actual Code** | `main.py` | End-to-end interactive demo walkthrough and automated evaluation runner. |
+| **Submission Report & Run Guide** | **Actual Docs** | `report.md`, `README.md` | Formal submission documentation with architecture diagrams, thought process, and run commands. |
 
 ---
 
 ## Global Constraints
 
-- **Python Version**: Python 3.12+ enforcing strict types (`uv run ty check`) and formatting (`uv run ruff check .` and `uv run ruff format .`).
-- **Frameworks**: Pydantic-AI agent harness with OpenAI-compatible endpoint (`AsyncOpenAI`) configured via `pydantic-settings` (`Settings`).
-- **Telemetry Invariance**: Zero false positives permitted on normal cluster telemetry (`ambient=*`, `normal`, `running`, `Link ok`).
-- **Operator Authority**: No rule can be promoted without explicit operator approval (`InteractiveCLIOperator` or `--auto-approve` policy in headless mode).
-- **Incident Burst Protection**: Identical unresolved errors within a debounce window must not trigger redundant LLM calls.
+- **Python Version**: Python 3.12+ with strict typing (`uv run ty check`) and formatting (`uv run ruff check .` and `uv run ruff format .`).
+- **Telemetry Invariance**: Zero false alarms permitted on normal cluster telemetry (`ambient=*`, `normal`, `running`, `Link ok`).
+- **Token Efficiency**: 0 LLM calls for routine telemetry and known/cached errors; novel errors trigger exactly 1 SRE agent call per burst.
+- **Reproducibility**: All unit tests run via `uv run pytest`; benchmark metrics compute deterministically in seconds.
 
 ---
 
 ## Review Focus
 
-1. **Empty/Malformed Log Lines**: Parser must handle missing fields, malformed timestamps, or unexpected line lengths gracefully without crashing (Task 1).
-2. **ReDoS Vulnerability in Candidate Regex**: Synthesized rules with catastrophic backtracking must be blocked programmatically by the guardrail timeout (Task 3).
-3. **Bursting Error Storms**: Repetitive novel errors occurring consecutive times (e.g. 25x `err = 10`) must be collapsed into a single SRE incident (Task 2).
-4. **False Positive Poisoning**: Any candidate rule matching normal telemetry words must be rejected immediately by hard-coded guardrails before reaching operator review (Task 3).
-5. **Headless Execution Compatibility**: Automated evaluation and CI test suites must run without hanging on interactive stdin (Task 6).
+1. **Missing or Corrupted Fields**: Parser must handle empty nodes, missing timestamps, and escaped backslashes (`\ `) gracefully (Task 1).
+2. **Telemetry Leakage**: Normal heartbeat logs must never leak into the SRE agent (Task 1 & Task 6).
+3. **Burst Deduplication**: Repetitive novel errors occurring consecutive times (e.g. 25x `err = 10`) must trigger only 1 LLM query (Task 2 & Task 6).
+4. **Citation Grounding**: Every SRE agent output must cite specific documentation and reasons (Task 4).
+5. **Dynamic Cache Verification**: The second arrival of an unseen error must hit the fast path without re-invoking the LLM (Task 2 & Task 6).
 
 ---
 
@@ -81,6 +84,14 @@ def test_parse_standard_hpc_log():
     assert "err = 10" in event.message
 
 
+def test_parse_edge_case_empty_node():
+    raw = "48124  clusterfilesystem fdmn.full 1076621893 1 ServerFileSystem: ServerFileSystem domain root_domain is full"
+    event = parse_log_line(raw)
+    assert event.log_id == "48124"
+    assert event.subsystem == "clusterfilesystem"
+    assert event.event_type == "fdmn.full"
+
+
 def test_telemetry_filter_identifies_normal():
     raw = "2560243 gige3 gige temperature 1073198499 1 normal"
     event = parse_log_line(raw)
@@ -96,11 +107,11 @@ def test_telemetry_filter_retains_error():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_normalizer.py -v`  
-Expected: FAIL with ModuleNotFoundError or import errors.
+Expected: FAIL with ModuleNotFoundError.
 
 - [ ] **Step 3: Implement `LogEvent`, `parse_log_line`, and `TelemetryFilter`**
 
-Implement robust line splitting and regex parsing in `src/rules/normalizer.py`, and implement routine keyword/pattern matching (`ambient=`, `normal`, `Link ok`, `Fan speeds`, `status running`) in `src/rules/telemetry_filter.py`.
+In `src/rules/normalizer.py`, parse fields with positional awareness for varying headers. In `src/rules/telemetry_filter.py`, match benign keywords (`ambient=`, `normal`, `Link ok`, `Fan speeds`, `status running`, `responding`) to drop telemetry.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -110,40 +121,38 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/rules/ tests/test_normalizer.py
-git commit -m "feat(rules): add LogEvent normalizer and fast telemetry filter"
+git add src/rules/models.py src/rules/normalizer.py src/rules/telemetry_filter.py tests/test_normalizer.py
+git commit -m "feat(rules): add LogEvent normalizer and wire-speed telemetry filter"
 ```
 
 ---
 
-### Task 2: Rule Schema, RuleTreeEngine, and Incident Debouncer (Actual Code)
+### Task 2: Fast-Path Rule Tree Engine & Resolution Cache (Actual Code)
 
 **Files:**
 - Create: `src/rules/engine.py`
-- Create: `src/rules/debouncer.py`
 - Modify: `src/rules/models.py`
 - Test: `tests/test_rule_engine.py`
 
 **Interfaces:**
 - Consumes: `LogEvent` from `src/rules/models.py`
 - Produces:
-  - `Rule(rule_id: str, subsystem: str, event_type: str, pattern: str, resolution: ProblemResolution, provenance: dict)`
+  - `Rule(rule_id: str, subsystem: str, event_type: str, pattern: str, resolution: ProblemResolution)`
   - `RuleTreeEngine.match(event: LogEvent) -> ProblemResolution | None`
   - `RuleTreeEngine.add_rule(rule: Rule) -> None`
-  - `IncidentDebouncer.should_dispatch(event: LogEvent) -> bool`
+  - `RuleTreeEngine.cache_resolution(event: LogEvent, resolution: ProblemResolution) -> None`
 
-- [ ] **Step 1: Write failing tests for RuleTreeEngine and IncidentDebouncer**
+- [ ] **Step 1: Write failing tests for RuleTreeEngine and dynamic caching**
 
 ```python
 # tests/test_rule_engine.py
 from src.agent import ProblemResolution
-from src.rules.debouncer import IncidentDebouncer
 from src.rules.engine import RuleTreeEngine
 from src.rules.models import Rule
 from src.rules.normalizer import parse_log_line
 
 
-def test_rule_tree_match_and_hit():
+def test_rule_tree_match_preconfigured_rule():
     engine = RuleTreeEngine()
     resolution = ProblemResolution(
         error_summary="PSU failure",
@@ -169,16 +178,26 @@ def test_rule_tree_match_and_hit():
     assert matched.severity == "HIGH"
 
 
-def test_debouncer_collapses_burst():
-    debouncer = IncidentDebouncer(window_seconds=60)
-    event1 = parse_log_line(
+def test_rule_tree_dynamic_cache_resolution():
+    engine = RuleTreeEngine()
+    event = parse_log_line(
         "460903 resourcemgmtdaeomon node-25 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10"
     )
-    event2 = parse_log_line(
-        "460919 resourcemgmtdaeomon node-25 server subsys 1145552221 1 failed to configure resourcemgmt subsystem err = 10"
+    assert engine.match(event) is None
+
+    res = ProblemResolution(
+        error_summary="Resource daemon init failed",
+        root_cause="Daemon unable to configure subsystem",
+        severity="CRITICAL",
+        remediation_steps=["Restart daemon", "Check node controller"],
+        citations_and_reasons=["Resourcemgmt docs"],
     )
-    assert debouncer.should_dispatch(event1) is True
-    assert debouncer.should_dispatch(event2) is False
+    engine.cache_resolution(event, res)
+
+    # Next occurrence hits the cache
+    matched = engine.match(event)
+    assert matched is not None
+    assert matched.error_summary == "Resource daemon init failed"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -186,9 +205,9 @@ def test_debouncer_collapses_burst():
 Run: `uv run pytest tests/test_rule_engine.py -v`  
 Expected: FAIL with missing classes.
 
-- [ ] **Step 3: Implement `RuleTreeEngine` and `IncidentDebouncer`**
+- [ ] **Step 3: Implement `RuleTreeEngine` with hierarchical index and dynamic cache**
 
-Implement indexed dictionary lookup `self._tree[(subsystem, event_type)]` in `src/rules/engine.py` and timestamped in-flight tracking with TTL in `src/rules/debouncer.py`.
+In `src/rules/engine.py`, store rules in a nested dictionary `_tree[(subsystem, event_type)]` and support parameterized regex matching alongside an exact template hash cache.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -198,214 +217,138 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/rules/engine.py src/rules/debouncer.py tests/test_rule_engine.py
-git commit -m "feat(rules): implement RuleTreeEngine and incident storm debouncer"
+git add src/rules/engine.py src/rules/models.py tests/test_rule_engine.py
+git commit -m "feat(rules): implement RuleTreeEngine with dynamic resolution caching"
 ```
 
 ---
 
-### Task 3: Hard-Coded Code Safety Guardrails (Actual Code)
-
-**Files:**
-- Create: `src/guardrails.py`
-- Test: `tests/test_guardrails.py`
-
-**Interfaces:**
-- Consumes: `Rule` from `src/rules/models.py`, `LogEvent` from `src/rules/models.py`
-- Produces:
-  - `GuardrailValidator.validate_rule(rule: Rule, trigger_samples: list[LogEvent], telemetry_samples: list[LogEvent]) -> GuardrailResult`
-
-- [ ] **Step 1: Write failing tests for GuardrailValidator**
-
-```python
-# tests/test_guardrails.py
-import pytest
-from src.agent import ProblemResolution
-from src.guardrails import GuardrailError, GuardrailValidator
-from src.rules.models import Rule
-from src.rules.normalizer import parse_log_line
-
-
-def test_guardrail_rejects_telemetry_false_positive():
-    telemetry_sample = [
-        parse_log_line("2560243 gige3 gige temperature 1073198499 1 normal"),
-        parse_log_line("106391 node-226 node temperature 15.571 1 ambient=24"),
-    ]
-    trigger_sample = [
-        parse_log_line(
-            "460903 resourcemgmtdaeomon node-25 server subsys 1145552216 1 failed to configure resourcemgmt subsystem err = 10"
-        )
-    ]
-    # Overly broad pattern that accidentally matches any digit or word
-    broad_rule = Rule(
-        rule_id="RULE-BAD-01",
-        subsystem="server",
-        event_type="subsys",
-        pattern=r".*",  # Dangerous wildcard!
-        resolution=ProblemResolution(
-            error_summary="bad",
-            root_cause="bad",
-            severity="LOW",
-            remediation_steps=[],
-            citations_and_reasons=[],
-        ),
-    )
-    with pytest.raises(GuardrailError, match="false positive"):
-        GuardrailValidator.validate_rule(
-            broad_rule,
-            trigger_samples=trigger_sample,
-            telemetry_samples=telemetry_sample,
-        )
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `uv run pytest tests/test_guardrails.py -v`  
-Expected: FAIL with ModuleNotFoundError.
-
-- [ ] **Step 3: Implement `GuardrailValidator` and `GuardrailError` in `src/guardrails.py`**
-
-Enforce strict programmatic checks:
-1. ReDoS timeout & syntax validity via regex compile test.
-2. Positive match verification (`match_count > 0` on `trigger_samples`).
-3. Telemetry anti-match verification: immediate failure if any `telemetry_samples` match.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `uv run pytest tests/test_guardrails.py -v`  
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/guardrails.py tests/test_guardrails.py
-git commit -m "feat(guardrails): implement deterministic code safety guardrails"
-```
-
----
-
-### Task 4: Subsystem Knowledge Base & Real-Time SRE Agent (Actual Code)
+### Task 3: Subsystem Knowledge Base & Runbooks (Actual Code)
 
 **Files:**
 - Create: `src/knowledge/docs_db.py`
-- Modify: `src/agent.py` -> `src/sre_agent.py`
-- Test: `tests/test_sre_agent.py`
+- Test: `tests/test_docs_db.py`
 
 **Interfaces:**
 - Produces:
   - `query_subsystem_docs(subsystem: str, keyword: str = "") -> str`
-  - `create_sre_agent(settings: Settings) -> Agent[Settings, ProblemResolution]`
-  - `resolve_incident(event: LogEvent, agent: Agent, settings: Settings) -> ProblemResolution`
+  - `list_known_subsystems() -> list[str]`
 
-- [ ] **Step 1: Write failing tests for Subsystem Knowledge Base & SRE Agent**
+- [ ] **Step 1: Write failing tests for Subsystem Knowledge Base**
 
 ```python
-# tests/test_sre_agent.py
-from src.knowledge.docs_db import query_subsystem_docs
-from src.rules.normalizer import parse_log_line
-from src.sre_agent import create_sre_agent
+# tests/test_docs_db.py
+from src.knowledge.docs_db import list_known_subsystems, query_subsystem_docs
 
 
-def test_knowledge_base_covers_lanl_subsystems():
-    res = query_subsystem_docs("clusterfilesystem", "panic")
-    assert "ServerFileSystem domain panic" in res
-    assert "Remediation" in res
+def test_knowledge_base_covers_key_subsystems():
+    subsystems = list_known_subsystems()
+    assert "clusterfilesystem" in subsystems
+    assert "resourcemgmtdaeomon" in subsystems
+    assert "unix.hw" in subsystems
+    assert "switch_module" in subsystems
 
 
-def test_sre_agent_creation():
-    agent = create_sre_agent()
-    assert agent is not None
+def test_query_subsystem_returns_actionable_runbook():
+    doc = query_subsystem_docs("clusterfilesystem", "panic")
+    assert "ServerFileSystem domain panic" in doc
+    assert "Remediation" in doc
+    assert "Citation" in doc
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_sre_agent.py -v`  
+Run: `uv run pytest tests/test_docs_db.py -v`  
 Expected: FAIL with ModuleNotFoundError.
 
-- [ ] **Step 3: Implement `src/knowledge/docs_db.py` and `src/sre_agent.py`**
+- [ ] **Step 3: Implement `src/knowledge/docs_db.py` with LANL HPC Runbooks**
 
-Populate comprehensive runbooks in `docs_db.py` covering all 44 LANL HPC categories (`resourcemgmtdaeomon`, `clusterfilesystem`, `unix.hw`, `switch_module`, `boot_cmd`, `node`), and attach the tool to the Pydantic-AI agent.
+Create comprehensive, domain-accurate documentation for LANL HPC subsystems:
+- `resourcemgmtdaeomon`: Config error 10, node controller timeout.
+- `clusterfilesystem`: `fdmn.panic`, `fdmn.full`, unserved storage domains.
+- `unix.hw`: `alt0` network interface down, hardware state change unavailable.
+- `switch_module`: PSU failover, temperature warnings, link flapping.
+- `boot_cmd`: `CMF-Port` disconnection, node state determination errors, console busy.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_sre_agent.py -v`  
+Run: `uv run pytest tests/test_docs_db.py -v`  
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/knowledge/ src/sre_agent.py tests/test_sre_agent.py
-git commit -m "feat(agent): enrich subsystem knowledge base and configure SRE agent"
+git add src/knowledge/docs_db.py tests/test_docs_db.py
+git commit -m "feat(knowledge): implement LANL HPC subsystem knowledge base and runbooks"
 ```
 
 ---
 
-### Task 5: Post-Mortem Consolidation Agent & Approval Gate (Actual Code)
+### Task 4: Production SRE Resolution Agent (Actual Code)
 
 **Files:**
-- Create: `src/post_mortem_agent.py`
-- Test: `tests/test_post_mortem.py`
+- Modify: `src/agent.py`
+- Test: `tests/test_agent.py`
 
 **Interfaces:**
-- Consumes: `RuleTreeEngine` from `src/rules/engine.py`, `GuardrailValidator` from `src/guardrails.py`
+- Consumes: `query_subsystem_docs` from `src/knowledge/docs_db.py`, `Settings` from `src/config.py`
 - Produces:
-  - `RuleCandidate(subsystem: str, event_type: str, pattern: str, resolution: ProblemResolution)`
-  - `OperatorApprovalGate.request_approval(candidate: RuleCandidate, metrics: dict) -> bool`
-  - `PostMortemConsolidationEngine.process_incident(event: LogEvent, resolution: ProblemResolution) -> Rule | None`
+  - `ProblemResolution(error_summary: str, root_cause: str, severity: str, remediation_steps: list[str], citations_and_reasons: list[str])`
+  - `create_agent(settings: Settings | None) -> Agent[Settings, ProblemResolution]`
+  - `async analyze_log(log_event: LogEvent, agent: Agent, settings: Settings) -> ProblemResolution`
 
-- [ ] **Step 1: Write failing tests for PostMortemConsolidationEngine**
+- [ ] **Step 1: Write failing test for SRE Agent tool invocation**
 
 ```python
-# tests/test_post_mortem.py
-from src.agent import ProblemResolution
-from src.post_mortem_agent import OperatorApprovalGate, PostMortemConsolidationEngine
-from src.rules.engine import RuleTreeEngine
-from src.rules.models import RuleCandidate
+# tests/test_agent.py
+import pytest
+from src.agent import ProblemResolution, create_agent
 from src.rules.normalizer import parse_log_line
 
 
-def test_post_mortem_auto_approval():
-    engine = RuleTreeEngine()
-    pm = PostMortemConsolidationEngine(rule_engine=engine, auto_approve=True)
-    event = parse_log_line(
-        "70000 node-D0 clusterfilesystem fdmn.panic 1091728051 1 ServerFileSystem: An ServerFileSystem domain panic has occurred on storage421"
+def test_agent_tool_registry():
+    agent = create_agent()
+    # Check query_subsystem_docs is registered as a tool
+    tool_names = [t.name for t in agent._function_tools.values()]
+    assert "query_subsystem_docs" in tool_names
+
+
+def test_problem_resolution_schema_validation():
+    res = ProblemResolution(
+        error_summary="Interface alt0 down",
+        root_cause="NIFF detected network loss",
+        severity="HIGH",
+        remediation_steps=["Check cable", "Restart alt0"],
+        citations_and_reasons=["LANL Unix.hw Runbook Sec 3.1"],
     )
-    resolution = ProblemResolution(
-        error_summary="Filesystem domain panic",
-        root_cause="Storage domain panic",
-        severity="CRITICAL",
-        remediation_steps=["Check storage controller", "Run domain recovery"],
-        citations_and_reasons=["ClusterFS Manual Section 8"],
-    )
-    new_rule = pm.process_incident(event, resolution)
-    assert new_rule is not None
-    assert engine.match(event) is not None
+    assert res.severity == "HIGH"
+    assert len(res.remediation_steps) == 2
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_post_mortem.py -v`  
-Expected: FAIL with ModuleNotFoundError.
+Run: `uv run pytest tests/test_agent.py -v`  
+Expected: FAIL if tools or helpers are missing.
 
-- [ ] **Step 3: Implement `PostMortemConsolidationEngine` and `OperatorApprovalGate`**
+- [ ] **Step 3: Update `src/agent.py` with enhanced tools and system prompt**
 
-Implement candidate rule synthesis, wire to `GuardrailValidator`, prompt operator in interactive mode (or pass if `auto_approve=True`), and register newly approved rules into `RuleTreeEngine`.
+Wire `query_subsystem_docs` directly from `src/knowledge/docs_db.py` into the Pydantic-AI agent. Provide helper `analyze_log(event, agent, settings)` that constructs a rich incident prompt with log fields (`node`, `subsystem`, `message`).
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_post_mortem.py -v`  
+Run: `uv run pytest tests/test_agent.py -v`  
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/post_mortem_agent.py tests/test_post_mortem.py
-git commit -m "feat(consolidation): implement post-mortem rule consolidation and approval gate"
+git add src/agent.py tests/test_agent.py
+git commit -m "feat(agent): wire production SRE agent with rich knowledge tools"
 ```
 
 ---
 
-### Task 6: Curated Golden Evaluation Benchmark & Evaluation Suite (Actual Code & Data)
+### Task 5: Curated Golden Evaluation Benchmark & Evaluation Harness (Actual Code & Data)
 
 **Files:**
 - Create: `data/golden_eval.json`
@@ -414,35 +357,36 @@ git commit -m "feat(consolidation): implement post-mortem rule consolidation and
 
 **Interfaces:**
 - Produces:
-  - `EvaluationBenchmark(dataset_path: Path)`
-  - `evaluate_system(benchmark_path: Path, rule_engine: RuleTreeEngine) -> EvaluationMetrics`
-  - `EvaluationMetrics(precision: float, recall: float, f1: float, fast_path_hit_rate: float)`
+  - `data/golden_eval.json`: 150 labeled log lines (`is_error: bool`, `expected_severity: str`, `category: str`).
+  - `evaluate_benchmark(benchmark_path: Path, rule_engine: RuleTreeEngine) -> BenchmarkMetrics`
+  - `BenchmarkMetrics(total: int, precision: float, recall: float, f1: float, fast_path_hits: int, telemetry_filtered: int)`
 
-- [ ] **Step 1: Write failing test for Evaluation Benchmark**
+- [ ] **Step 1: Write failing tests for Evaluation Harness**
 
 ```python
 # tests/test_evaluation.py
 from pathlib import Path
-from src.evaluation import evaluate_system
+from src.evaluation import evaluate_benchmark
 from src.rules.engine import RuleTreeEngine
 
 
-def test_evaluation_benchmark_runs():
+def test_evaluation_benchmark_executes():
     engine = RuleTreeEngine()
-    metrics = evaluate_system(Path("data/golden_eval.json"), engine)
-    assert metrics.precision >= 0.0
-    assert metrics.recall >= 0.0
-    assert 0.0 <= metrics.f1 <= 1.0
+    metrics = evaluate_benchmark(Path("data/golden_eval.json"), engine)
+    assert metrics.total > 50
+    assert 0.0 <= metrics.precision <= 1.0
+    assert 0.0 <= metrics.recall <= 1.0
+    assert metrics.telemetry_filtered > 0
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/test_evaluation.py -v`  
-Expected: FAIL with FileNotFoundError or missing module.
+Expected: FAIL with missing file/module.
 
 - [ ] **Step 3: Generate `data/golden_eval.json` and implement `src/evaluation.py`**
 
-Construct `data/golden_eval.json` containing 150 diverse labeled log instances (normal telemetry vs critical errors) from the train, val, and test splits. Implement evaluation harness calculating Precision, Recall, F1, and fast-path vs agent breakdown.
+Construct `data/golden_eval.json` containing 150 diverse labeled log instances across normal telemetry and failures (PSU, filesystem panic, interface down, daemon error 10, temperature warnings). Implement evaluation metrics calculation in `src/evaluation.py`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -453,59 +397,97 @@ Expected: PASS
 
 ```bash
 git add data/golden_eval.json src/evaluation.py tests/test_evaluation.py
-git commit -m "feat(eval): add golden evaluation dataset and evaluation harness"
+git commit -m "feat(eval): add golden evaluation benchmark and metrics harness"
 ```
 
 ---
 
-### Task 7: Unified CLI & Interactive Demo Runner (Actual Code)
+### Task 6: Stream Pipeline Orchestrator & Unified CLI (Actual Code)
 
 **Files:**
+- Create: `src/pipeline.py`
 - Modify: `main.py`
-- Test: `tests/test_cli.py`
+- Test: `tests/test_pipeline.py`
 
 **Interfaces:**
 - Produces:
-  - CLI command `main.py demo`: runs the end-to-end interactive workflow.
-  - CLI command `main.py evaluate`: outputs quantitative precision/recall benchmark.
+  - `LogPipeline(rule_engine: RuleTreeEngine, agent: Agent, settings: Settings)`
+  - `async LogPipeline.process_log(raw_line: str) -> PipelineResult(status: str, resolution: ProblemResolution | None, cost_usd: float)`
+  - CLI: `main.py demo` (walks through telemetry -> fast path -> agent -> cache hit)
+  - CLI: `main.py evaluate` (computes precision/recall and prints benchmark report)
 
-- [ ] **Step 1: Write failing CLI test**
+- [ ] **Step 1: Write failing tests for LogPipeline**
 
 ```python
-# tests/test_cli.py
+# tests/test_pipeline.py
 import pytest
-from main import run_evaluation_cli
+from src.agent import ProblemResolution, create_agent
+from src.config import get_settings
+from src.pipeline import LogPipeline
+from src.rules.engine import RuleTreeEngine
 
 
-def test_evaluation_cli_headless():
-    exit_code = run_evaluation_cli(auto_approve=True)
-    assert exit_code == 0
+@pytest.mark.asyncio
+async def test_pipeline_filters_telemetry():
+    engine = RuleTreeEngine()
+    pipeline = LogPipeline(rule_engine=engine, agent=None)
+    result = await pipeline.process_log(
+        "2560243 gige3 gige temperature 1073198499 1 normal"
+    )
+    assert result.status == "TELEMETRY_FILTERED"
+    assert result.resolution is None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_hits_fast_path():
+    engine = RuleTreeEngine()
+    event_raw = "98745 Interconnect-0N00 switch_module psu 1110481498 1 PSU status ( off on )"
+    # Seed rule
+    engine.cache_resolution(
+        event_raw,
+        ProblemResolution(
+            error_summary="PSU error",
+            root_cause="PSU off",
+            severity="HIGH",
+            remediation_steps=["Swap"],
+            citations_and_reasons=["Manual"],
+        ),
+    )
+    pipeline = LogPipeline(rule_engine=engine, agent=None)
+    result = await pipeline.process_log(event_raw)
+    assert result.status == "FAST_PATH_HIT"
+    assert result.resolution.severity == "HIGH"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_cli.py -v`  
-Expected: FAIL with AttributeError.
+Run: `uv run pytest tests/test_pipeline.py -v`  
+Expected: FAIL with ModuleNotFoundError.
 
-- [ ] **Step 3: Update `main.py` with `demo` and `evaluate` CLI modes**
+- [ ] **Step 3: Implement `src/pipeline.py` and update `main.py`**
 
-Wire the complete lifecycle: parsing, telemetry filtering, rule engine lookup, SRE agent fallback, post-mortem rule synthesis, and benchmark reporting.
+In `src/pipeline.py`, wire the two-tier triage:
+1. `TelemetryFilter`: returns `TELEMETRY_FILTERED`.
+2. `RuleTreeEngine.match`: returns `FAST_PATH_HIT`.
+3. In-flight debounce check: if duplicate novel error, returns `IN_FLIGHT_ATTACHED`.
+4. Fallback: calls `agent.run()`, caches result in `RuleTreeEngine`, returns `AGENT_RESOLVED`.
+In `main.py`, implement `demo` and `evaluate` CLI options.
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `uv run pytest tests/test_cli.py -v`  
+Run: `uv run pytest tests/test_pipeline.py -v`  
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add main.py tests/test_cli.py
-git commit -m "feat(cli): wire unified demo and evaluation CLI entry points"
+git add src/pipeline.py main.py tests/test_pipeline.py
+git commit -m "feat(pipeline): implement stream pipeline and unified demo/eval CLI"
 ```
 
 ---
 
-### Task 8: Ingestion Architecture Design & Submission Report (Design & Documentation Only)
+### Task 7: Architectural Submission Report & Build Documentation (Design & Docs Only)
 
 **Files:**
 - Create: `report.md`
@@ -513,24 +495,25 @@ git commit -m "feat(cli): wire unified demo and evaluation CLI entry points"
 
 **Deliverables:**
 - **`report.md`**:
-  - Detailed Data Ingestion Architecture Diagram (Kafka, Fluentbit, ClickHouse/Snowflake) as requested by instructions ("don't implement, just diagram").
-  - System Architecture & Thought Process: Explaining the two-tier fast/slow path, the two-agent separation of concerns, and future-proofing.
-  - Dataset analysis findings (LANL System 20, chronological drift, lack of official labels).
-  - Quantitative benchmark results (Precision, Recall, F1, cost/latency savings).
-  - Suggested future improvements (e.g. streaming window correlation, distributed vector store).
+  - **Data Ingestion Architecture Diagram & Writeup**: End-to-end Kafka, Fluentbit, and ClickHouse/Snowflake streaming ingestion architecture diagram as explicitly instructed ("don't implement, just diagram").
+  - **Post-Mortem Consolidation Agent Architecture Diagram & Writeup**: Offline multi-agent consolidation loop, cross-incident clustering, and human approval workflow diagrammed and documented in the report.
+  - **System Thought Process & Two-Tier Trade-Offs**: Analysis of wire-speed triage vs deep reasoning, token savings, and latency guarantees.
+  - **Dataset Analysis Findings**: LANL System 20 analysis, 44 subsystem pairs, lack of official labels, and chronological drift.
+  - **Quantitative Evaluation Results**: Precision, Recall, F1, and cost breakdown from `main.py evaluate`.
+  - **Future Improvements**: Distributed vector stores, cross-node temporal anomaly detection.
 - **`README.md`**:
-  - Exact prerequisites and execution steps (`uv run python main.py demo`, `uv run python main.py evaluate`, `uv run pytest`).
+  - Exact setup, verification, and run commands (`uv run python main.py demo`, `uv run python main.py evaluate`, `uv run pytest`).
 
-- [ ] **Step 1: Create `report.md` with complete ingestion architecture diagram and analysis**
-- [ ] **Step 2: Update `README.md` with clear instructions to run and test**
+- [ ] **Step 1: Write `report.md` with complete diagrams, analysis, and benchmark outcomes**
+- [ ] **Step 2: Write `README.md` with exact instructions to execute and test**
 - [ ] **Step 3: Run complete static check and test suite**
 
 Run: `uv run ruff check . && uv run ruff format . && uv run ty check && uv run pytest`  
-Expected: All checks and tests pass with 0 warnings/errors.
+Expected: All checks and tests pass with 0 errors.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add report.md README.md
-git commit -m "docs: complete submission report and build instructions"
+git commit -m "docs: add comprehensive submission report and build instructions"
 ```
