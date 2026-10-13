@@ -1,16 +1,20 @@
 """Tests for the production SRE Resolution Agent and knowledge tools wiring."""
 
+import time
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
+import src.agent as agent_module
 from src.agent import (
     SRE_SYSTEM_PROMPT,
     ProblemResolution,
     analyze_log,
     create_agent,
+    reset_circuit_breaker,
 )
 from src.config import Settings
 from src.rules.models import LogEvent
@@ -185,8 +189,8 @@ async def test_analyze_log_with_test_model_calling_tools() -> None:
 
 
 @pytest.mark.anyio
-async def test_analyze_log_offline_graceful_fallback() -> None:
-    """Verify analyze_log handles offline/error states and returns a grounded resolution."""
+async def test_analyze_log_raises_on_model_failure() -> None:
+    """Verify analyze_log re-raises exception when LLM inference fails."""
 
     def failing_fn(messages: Any, info: Any) -> Any:
         raise ConnectionError("NVIDIA NIM endpoint unreachable (offline test)")
@@ -213,39 +217,83 @@ async def test_analyze_log_offline_graceful_fallback() -> None:
         raw=raw_line,
     )
 
-    resolution = await analyze_log(log_event, agent=failing_agent, settings=test_settings)
-
-    assert isinstance(resolution, ProblemResolution)
-    assert len(resolution.remediation_steps) > 0
-    assert len(resolution.citations_and_reasons) > 0
-    assert "clusterfilesystem" in resolution.citations_and_reasons[0].lower()
+    with pytest.raises(ConnectionError, match="NVIDIA NIM endpoint unreachable"):
+        await analyze_log(log_event, agent=failing_agent, settings=test_settings)
 
 
-def test_fallback_offline_resolution_subsystem_and_keyword_priority() -> None:
-    """Verify _fallback_offline_resolution prioritizes subsystem+keyword matches
-    and resolves aliases.
-    """
-    from src.agent import _fallback_offline_resolution
-
-    # Test 1: Subsystem alias "resourcemgmt" resolved to "resourcemgmtdaeomon"
-    # and keyword "err = 10" matches config err10 runbook rather than controller timeout or startup
-    event_err10 = LogEvent(
-        log_id="1",
-        node="node-1",
-        subsystem="resourcemgmt",
-        event_type="server",
-        message="failed to configure resourcemgmt subsystem err = 10",
+@pytest.mark.anyio
+async def test_analyze_log_raises_when_circuit_breaker_open() -> None:
+    """Verify analyze_log raises RuntimeError when circuit breaker is open."""
+    reset_circuit_breaker()
+    test_settings = Settings(
+        base_url="https://test.nvidia.com/v1",
+        api_key="test-key",
+        model_name="openai/gpt-oss-20b",
     )
-    res_err10 = _fallback_offline_resolution(event_err10, Exception("offline test"))
-    assert "resourcemgmt-config-err10" in res_err10.citations_and_reasons[0]
+    test_model = TestModel()
+    agent = create_agent(settings=test_settings, model=test_model)
 
-    # Test 2: Subsystem with no matching keywords falls back to general subsystem entry
-    event_general = LogEvent(
-        log_id="2",
-        node="node-2",
-        subsystem="cluster_filesystem",
-        event_type="general",
-        message="some unclassified filesystem event",
+    raw_line = (
+        "1117780000 2005.06.03 node-44 clusterfilesystem: "
+        "fdmn.panic domain panic unrecoverable disk error"
     )
-    res_general = _fallback_offline_resolution(event_general, Exception("offline test"))
-    assert "clusterfilesystem" in res_general.citations_and_reasons[0].lower()
+    log_event = LogEvent(
+        log_id="1117780000",
+        node="node-44",
+        subsystem="clusterfilesystem",
+        event_type="fdmn.panic",
+        timestamp=1117780000,
+        flag=1,
+        message="domain panic unrecoverable disk error",
+        raw=raw_line,
+    )
+
+    try:
+        agent_module._circuit_breaker_open = True
+        agent_module._circuit_breaker_last_failure = time.monotonic()
+        with pytest.raises(RuntimeError, match="circuit breaker open"):
+            await analyze_log(log_event, agent=agent, settings=test_settings)
+    finally:
+        reset_circuit_breaker()
+
+
+@pytest.mark.anyio
+async def test_circuit_breaker_trips_on_live_network_failure() -> None:
+    """Verify circuit breaker trips and resets properly on live network errors."""
+    reset_circuit_breaker()
+    test_settings = Settings(
+        base_url="https://test.nvidia.com/v1",
+        api_key="test-key",
+        model_name="openai/gpt-oss-20b",
+    )
+    # create default agent (uses OpenAIChatModel, so is_live_network is True)
+    agent = create_agent(settings=test_settings)
+
+    raw_line = (
+        "1117780000 2005.06.03 node-44 clusterfilesystem: "
+        "fdmn.panic domain panic unrecoverable disk error"
+    )
+    log_event = LogEvent(
+        log_id="1117780000",
+        node="node-44",
+        subsystem="clusterfilesystem",
+        event_type="fdmn.panic",
+        timestamp=1117780000,
+        flag=1,
+        message="domain panic unrecoverable disk error",
+        raw=raw_line,
+    )
+
+    try:
+        with patch.object(agent, "run", side_effect=ConnectionError("Endpoint timed out")):
+            with pytest.raises(ConnectionError, match="Endpoint timed out"):
+                await analyze_log(log_event, agent=agent, settings=test_settings)
+
+            assert agent_module._circuit_breaker_open is True
+
+            # Subsequent call immediately raises RuntimeError due to open circuit breaker
+            with pytest.raises(RuntimeError, match="circuit breaker open"):
+                await analyze_log(log_event, agent=agent, settings=test_settings)
+    finally:
+        reset_circuit_breaker()
+        assert agent_module._circuit_breaker_open is False

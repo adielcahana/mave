@@ -79,118 +79,24 @@ def get_default_benign_cases(benchmark_path: str = "data/golden_eval.json") -> l
     return cases
 
 
-def _get_fallback_default_rules() -> list[Rule]:
-    """Hard-coded fallback rules if rules.json is missing or corrupted."""
-    return [
-        Rule(
-            rule_id="RULE-PSU-01",
-            subsystem="switch_module",
-            event_type="psu",
-            pattern=r"PSU status \( (?:off on|on off) \)",
-            human_validated=True,
-            validation_status="VALIDATED",
-            resolution=ProblemResolution(
-                error_summary="PSU failure detected",
-                root_cause="Power supply unit degraded or powered off on switch module",
-                severity="HIGH",
-                remediation_steps=[
-                    "Inspect physical switch power module indicator LEDs",
-                    "Replace failed PSU unit or reconnect power feed",
-                ],
-                citations_and_reasons=[
-                    "Hardware manual section 4.2: Redundant PSU Operations",
-                ],
-            ),
-        ),
-        Rule(
-            rule_id="RULE-FS-FULL-01",
-            subsystem="clusterfilesystem",
-            event_type="fdmn.full",
-            pattern=r"ServerFileSystem: ServerFileSystem domain \S+ is full",
-            human_validated=True,
-            validation_status="VALIDATED",
-            resolution=ProblemResolution(
-                error_summary="Cluster filesystem domain full",
-                root_cause="Storage domain exceeded 100% capacity",
-                severity="HIGH",
-                remediation_steps=[
-                    "Purge expired scratch directories and temporary dumps",
-                    "Expand volume quota or allocate additional storage domains",
-                ],
-                citations_and_reasons=[
-                    "LANL Storage Architecture Guide: Sec 8.3 Filesystem Quotas",
-                ],
-            ),
-        ),
-        Rule(
-            rule_id="RULE-FS-PANIC-01",
-            subsystem="clusterfilesystem",
-            event_type="fdmn.panic",
-            pattern=r"ServerFileSystem: ServerFileSystem domain \S+ is panicked",
-            human_validated=True,
-            validation_status="VALIDATED",
-            resolution=ProblemResolution(
-                error_summary="Cluster filesystem domain panic",
-                root_cause="Severe filesystem metadata inconsistency or I/O barrier timeout",
-                severity="CRITICAL",
-                remediation_steps=[
-                    "Quarantine and unmount the affected storage domain immediately",
-                    "Execute filesystem consistency check (advfsck)",
-                    "Restore corrupted metadata from snapshot if unrecoverable",
-                ],
-                citations_and_reasons=[
-                    "LANL Storage Architecture Guide: Sec 8.1 Panic Recovery",
-                ],
-            ),
-        ),
-        Rule(
-            rule_id="RULE-NET-ALT0-01",
-            subsystem="unix.hw",
-            event_type="*",
-            pattern=r"(?:interface alt0 is down|Component \S*alt0\S* is in the unavailable state)",
-            human_validated=True,
-            validation_status="VALIDATED",
-            resolution=ProblemResolution(
-                error_summary="Network interface alt0 unavailable",
-                root_cause="Physical network link loss or transceiver failure on alt0",
-                severity="HIGH",
-                remediation_steps=[
-                    "Verify physical Ethernet/InfiniBand patch cord and switch port",
-                    "Restart interface via `ifconfig alt0 down && ifconfig alt0 up`",
-                    "Reseat optical transceiver if link does not recover",
-                ],
-                citations_and_reasons=[
-                    "LANL Unix Hardware Runbook: Sec 3.1 Interface Diagnostics",
-                ],
-            ),
-        ),
-        Rule(
-            rule_id="RULE-RESMGMT-ERR10-01",
-            subsystem="resourcemgmtdaeomon",
-            event_type="*",
-            pattern=r"failed to configure resourcemgmt subsystem err = 10",
-            human_validated=True,
-            validation_status="VALIDATED",
-            resolution=ProblemResolution(
-                error_summary="Resource manager daemon initialization failure",
-                root_cause="Subsystem configuration error code 10 during daemon startup",
-                severity="CRITICAL",
-                remediation_steps=[
-                    "Check node controller connectivity and verify daemon configuration file",
-                    "Restart resourcemgmtdaeomon service",
-                ],
-                citations_and_reasons=[
-                    "LANL Resource Management Architecture Manual: Sec 5.2",
-                ],
-            ),
-        ),
-    ]
+DEFAULT_RULES_PATHS: list[Path] = [
+    Path("rules/rules.json"),
+    Path(__file__).resolve().parent.parent.parent / "rules" / "rules.json",
+    Path("resources/rules.json"),
+    Path(__file__).resolve().parent.parent.parent / "resources" / "rules.json",
+]
 
 
 def get_default_rules(path: Path | str | None = "rules/rules.json") -> list[Rule]:
-    """Return standard LANL HPC failure resolution rules from rules file, or fallback list."""
+    """Return standard LANL HPC failure resolution rules from rules file."""
+    candidate_paths: list[Path] = []
     if path:
-        p = Path(path)
+        candidate_paths.append(Path(path))
+    for default_p in DEFAULT_RULES_PATHS:
+        if default_p not in candidate_paths:
+            candidate_paths.append(default_p)
+
+    for p in candidate_paths:
         if p.is_file():
             try:
                 with open(p, encoding="utf-8") as f:
@@ -198,7 +104,7 @@ def get_default_rules(path: Path | str | None = "rules/rules.json") -> list[Rule
                 return [Rule.model_validate(item) for item in data]
             except Exception:
                 pass
-    return _get_fallback_default_rules()
+    return []
 
 
 class RuleTreeEngine:
@@ -307,9 +213,7 @@ class RuleTreeEngine:
 
     def load_default_rules(self) -> None:
         """Load standard LANL HPC failure rules into the tree."""
-        rules = (
-            get_default_rules(self.rules_path) if self.rules_path else _get_fallback_default_rules()
-        )
+        rules = get_default_rules(self.rules_path)
         for rule in rules:
             self.add_rule(rule, persist=False)
 

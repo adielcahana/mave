@@ -48,7 +48,7 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
 
 ### Core Modules (`src/`)
 
-- `src/agent.py`: Production Pydantic-AI SRE agent with runbook tools, prompt grounding, autonomous fallback, and circuit breaker.
+- `src/agent.py`: Production Pydantic-AI SRE agent with runbook tools, prompt grounding, and circuit breaker.
 - `src/config.py`: Application settings (`Settings`) with `.env` loading.
 - `src/pipeline.py`: Two-tier streaming orchestrator (`HPCStreamPipeline`) connecting ingestion, filtering, rules, and agent escalation.
 - `src/evaluation.py`: Quantitative benchmark evaluation suite measuring classification accuracy, LLM bypass rate, and latency SLAs.
@@ -105,7 +105,7 @@ mave/
 │       ├── telemetry_filter.py # Wire-speed benign telemetry filter
 │       └── template_registry.py # Regex template extraction & triage
 └── tests/
-    ├── test_agent.py             # SRE agent tool-calling & fallback tests
+    ├── test_agent.py             # SRE agent tool-calling, circuit breaker & error handling tests
     ├── test_docs_db.py           # Knowledge base lookup & search tests
     ├── test_evaluation.py        # Benchmark metrics & scoring tests
     ├── test_normalizer.py        # Log parsing & header extraction tests
@@ -121,7 +121,7 @@ mave/
 Always verify the codebase after any modification using Astral's tooling suite:
 
 ```bash
-# 1. Run all unit and integration tests (75 tests passing)
+# 1. Run all unit and integration tests (81 tests passing)
 uv run pytest
 
 # 2. Check static typing (Astral Ty)

@@ -472,7 +472,7 @@ Our knowledge base includes comprehensive, battle-tested runbooks covering all m
 
 ### 7.4 Air-Gapped Supercomputer Fallback Guarantee
 
-Supercomputers in national laboratories often run in disconnected, air-gapped environments without external internet access. In the event of an API disconnection or NVIDIA NIM endpoint timeout, `src/agent.py` includes a **deterministic offline runbook fallback** (`_fallback_offline_resolution`). The system transparently matches symptoms against the local compiled knowledge base, formulating grounded recommendations and maintaining 100% cluster availability even during complete network isolation.
+In the event of an API disconnection or NVIDIA NIM endpoint timeout, src/agent.py trips a **circuit breaker** to throttle downstream calls and prevent cascading failures. Vetted cluster failure modes continue resolving in sub-milliseconds via the fast-path in-memory RuleTreeEngine with zero external dependencies.
 
 ---
 

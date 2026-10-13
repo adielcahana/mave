@@ -1,13 +1,22 @@
 """Tests for Pipeline Orchestrator and unified CLI."""
 
+import asyncio
 import shutil
+import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from main import analyze_log_lines, main, run_demo, run_evaluate
+from main import (
+    LogProcessingStats,
+    analyze_log_lines,
+    main,
+    run_demo,
+    run_evaluate,
+    track_execution_timing,
+)
 from src.agent import ProblemResolution, create_agent
 from src.config import Settings
 from src.pipeline import LogPipeline, PipelineResult
@@ -203,3 +212,143 @@ def test_cli_main_single_line_empty() -> None:
     ):
         main()
     assert exc_info.value.code == 1
+
+
+@pytest.mark.anyio
+async def test_analyze_log_lines_runs_concurrently(test_settings: Settings) -> None:
+    """Verify analyze_log_lines processes lines concurrently rather than sequentially."""
+    pipeline = LogPipeline(settings=test_settings)
+    max_active = 0
+    active = 0
+    original_process = pipeline.process_log
+
+    async def mock_process(line: str) -> PipelineResult:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        res = await original_process(line)
+        active -= 1
+        return res
+
+    fan_log = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+    with patch.object(pipeline, "process_log", side_effect=mock_process):
+        lines = [
+            fan_log,
+            fan_log.replace("node-1", "node-2"),
+            fan_log.replace("node-1", "node-3"),
+        ]
+        stats = await analyze_log_lines(lines, pipeline=pipeline)
+        assert stats.total_lines == 3
+        assert max_active >= 2, f"Expected concurrent execution, but max active was {max_active}"
+
+
+@pytest.mark.anyio
+async def test_analyze_log_lines_with_concurrency_limit(test_settings: Settings) -> None:
+    """Verify analyze_log_lines respects concurrency_limit semaphore."""
+    pipeline = LogPipeline(settings=test_settings)
+    max_active = 0
+    active = 0
+    original_process = pipeline.process_log
+
+    async def mock_process(line: str) -> PipelineResult:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        res = await original_process(line)
+        active -= 1
+        return res
+
+    fan_log = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+    with patch.object(pipeline, "process_log", side_effect=mock_process):
+        lines = [fan_log] * 5
+        stats = await analyze_log_lines(lines, pipeline=pipeline, concurrency_limit=2)
+        assert stats.total_lines == 5
+        assert max_active <= 2
+
+
+@pytest.mark.anyio
+async def test_pipeline_process_logs_concurrency_limit(test_settings: Settings) -> None:
+    """Verify pipeline.process_logs respects concurrency_limit and returns expected results."""
+    pipeline = LogPipeline(settings=test_settings)
+    lines = [
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )",
+        "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )",
+    ]
+    results = await pipeline.process_logs(lines, concurrency_limit=1)
+    assert len(results) == 2
+    assert results[0].status == "TELEMETRY_FILTERED"
+    assert results[1].status == "FAST_PATH_HIT"
+
+
+@pytest.mark.anyio
+async def test_pipeline_in_flight_burst_deduplication(
+    test_settings: Settings,
+    mock_resolution: ProblemResolution,
+) -> None:
+    """Verify concurrent identical novel errors debounce via IN_FLIGHT_ATTACHED."""
+    test_model = TestModel(custom_output_args=mock_resolution.model_dump())
+    agent = create_agent(settings=test_settings, model=test_model)
+    pipeline = LogPipeline(agent=agent, settings=test_settings)
+
+    novel_error_line = (
+        "160000 node-99 kernel error 1074220000 1 unknown critical bus fault 0xdeadbeef"
+    )
+
+    call_count = 0
+
+    async def mock_analyze(*args: object, **kwargs: object) -> ProblemResolution:
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.02)  # Simulate LLM latency
+        return mock_resolution
+
+    with patch("src.pipeline.analyze_log", side_effect=mock_analyze):
+        results = await pipeline.process_logs([novel_error_line] * 4)
+
+    assert len(results) == 4
+    # The leader is AGENT_RESOLVED, subsequent concurrent coroutines attach
+    statuses = [r.status for r in results]
+    assert statuses[0] == "AGENT_RESOLVED"
+    assert statuses.count("IN_FLIGHT_ATTACHED") == 3
+    assert call_count == 1
+
+
+def test_log_processing_stats_recording_and_timing(mock_resolution: ProblemResolution) -> None:
+    """Verify LogProcessingStats records outcomes and timing correctly."""
+    stats = LogProcessingStats(file_name="test.log", total_lines=3)
+
+    r_benign = PipelineResult(log_id="1", status="TELEMETRY_FILTERED", cost_usd=0.0)
+    r_fast = PipelineResult(
+        log_id="2",
+        status="FAST_PATH_HIT",
+        resolution=mock_resolution,
+        cost_usd=0.0,
+    )
+    r_agent = PipelineResult(
+        log_id="3",
+        status="AGENT_RESOLVED",
+        resolution=mock_resolution,
+        cost_usd=0.0015,
+    )
+
+    stats.record_results([r_benign, r_fast, r_agent])
+
+    assert stats.benign_count == 1
+    assert stats.error_count == 2
+    assert stats.auto_annotated_count == 1
+    assert stats.llm_needed_count == 1
+    assert stats.total_cost_usd == pytest.approx(0.0015)
+    assert len(stats.unique_errors) == 1
+    assert stats.unique_errors[mock_resolution.root_cause.strip()][1] == 2
+
+    with track_execution_timing(stats):
+        time.sleep(0.01)
+
+    assert stats.elapsed_time_s >= 0.005
+    assert stats.throughput_lines_per_sec > 0.0

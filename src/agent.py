@@ -9,10 +9,8 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from src.config import Settings, get_settings
 from src.knowledge.docs_db import (
-    get_all_runbooks,
     list_known_subsystems,
     query_subsystem_docs,
-    resolve_subsystem,
 )
 from src.rules.models import LogEvent, ProblemResolution, ProblemResolutionWithRegex
 
@@ -24,6 +22,7 @@ __all__ = [
     "create_agent",
     "list_known_subsystems",
     "query_subsystem_docs",
+    "reset_circuit_breaker",
     "validate_suggested_regex",
 ]
 
@@ -172,103 +171,6 @@ def _build_incident_prompt(log_event: LogEvent) -> str:
     return base_prompt
 
 
-def _fallback_offline_resolution(
-    log_event: LogEvent,
-    exc: Exception,
-    as_regex: bool = False,
-) -> ProblemResolution | ProblemResolutionWithRegex:
-    """Generate a grounded ProblemResolution fallback using local runbooks when offline."""
-    # Look for matching runbooks in the local database
-    resolved_subsys = resolve_subsystem(log_event.subsystem)
-    all_runbooks = get_all_runbooks()
-    msg_lower = log_event.message.lower()
-
-    # Filter entries matching the resolved subsystem
-    subsystem_entries = [entry for entry in all_runbooks if entry.subsystem == resolved_subsys]
-
-    # 1. Prioritize entries matching both subsystem AND keywords
-    both_matches = [
-        entry
-        for entry in subsystem_entries
-        if any(kw.lower() in msg_lower for kw in entry.keywords)
-    ]
-
-    if both_matches:
-        entry = both_matches[0]
-    elif subsystem_entries:
-        # 2. Only if none match keywords fall back to general subsystem entries
-        entry = subsystem_entries[0]
-    else:
-        # 3. If subsystem has no direct entries, check global keyword matches
-        kw_matches = [
-            entry for entry in all_runbooks if any(kw.lower() in msg_lower for kw in entry.keywords)
-        ]
-        entry = kw_matches[0] if kw_matches else None
-
-    # Construct default regex fallback if unparsed
-    default_regex = (
-        r"^(?P<log_id>\S+)\s+(?P<subsystem>\S+)\s+(?P<message>.*)$" if log_event.is_unparsed else ""
-    )
-
-    if entry is not None:
-        severity = "CRITICAL" if "panic" in msg_lower else "HIGH"
-        if as_regex or log_event.is_unparsed:
-            return ProblemResolutionWithRegex(
-                error_summary=f"[{log_event.node}] {entry.scenario} ({log_event.message})",
-                root_cause=entry.root_cause,
-                severity=severity,
-                remediation_steps=list(entry.remediation_steps),
-                citations_and_reasons=[
-                    f"{entry.citation}: grounded runbook resolution for {log_event.subsystem}"
-                ],
-                suggested_log_template_regex=default_regex,
-            )
-        return ProblemResolution(
-            error_summary=f"[{log_event.node}] {entry.scenario} ({log_event.message})",
-            root_cause=entry.root_cause,
-            severity=severity,
-            remediation_steps=list(entry.remediation_steps),
-            citations_and_reasons=[
-                f"{entry.citation}: grounded runbook resolution for {log_event.subsystem}"
-            ],
-        )
-
-    # General fallback for undocumented subsystems
-    docs_snippet = query_subsystem_docs(log_event.subsystem, log_event.message)
-    trimmed_snippet = docs_snippet[:120].strip()
-    if as_regex or log_event.is_unparsed:
-        return ProblemResolutionWithRegex(
-            error_summary=(
-                f"[{log_event.node}] Incident in {log_event.subsystem}: {log_event.message}"
-            ),
-            root_cause=f"Subsystem error in {log_event.subsystem}. Excerpt: {trimmed_snippet}...",
-            severity="MEDIUM",
-            remediation_steps=[
-                f"Inspect system event log on node {log_event.node}.",
-                f"Query subsystem status for {log_event.subsystem}.",
-                "Verify network reachability and daemon responsiveness.",
-            ],
-            citations_and_reasons=[
-                f"[LANL HPC Knowledge Base: {log_event.subsystem}]: offline triage resolution"
-            ],
-            suggested_log_template_regex=default_regex,
-        )
-
-    return ProblemResolution(
-        error_summary=f"[{log_event.node}] Incident in {log_event.subsystem}: {log_event.message}",
-        root_cause=f"Subsystem error in {log_event.subsystem}. Excerpt: {trimmed_snippet}...",
-        severity="MEDIUM",
-        remediation_steps=[
-            f"Inspect system event log on node {log_event.node}.",
-            f"Query subsystem status for {log_event.subsystem}.",
-            "Verify network reachability and daemon responsiveness.",
-        ],
-        citations_and_reasons=[
-            f"[LANL HPC Knowledge Base: {log_event.subsystem}]: offline triage resolution"
-        ],
-    )
-
-
 _circuit_breaker_open: bool = False
 _circuit_breaker_last_failure: float = 0.0
 _CIRCUIT_BREAKER_COOLDOWN: float = 30.0
@@ -297,6 +199,10 @@ async def analyze_log(
       - Returns ProblemResolutionWithRegex when valid.
     When log_event.is_unparsed is False:
       - Uses standard ProblemResolution output without regex requirements.
+
+    Raises:
+      RuntimeError: If the LLM circuit breaker is open.
+      Exception: If LLM inference fails.
     """
     global _circuit_breaker_open, _circuit_breaker_last_failure
 
@@ -304,14 +210,10 @@ async def analyze_log(
     active_agent = agent if agent is not None else create_agent(settings=active_settings)
     is_live_network = isinstance(active_agent.model, OpenAIChatModel)
 
-    if is_live_network and _circuit_breaker_open:
+    if _circuit_breaker_open:
         now = time.monotonic()
         if now - _circuit_breaker_last_failure < _CIRCUIT_BREAKER_COOLDOWN:
-            return _fallback_offline_resolution(
-                log_event,
-                RuntimeError("LLM circuit breaker open"),
-                as_regex=log_event.is_unparsed,
-            )
+            raise RuntimeError("LLM circuit breaker open: requests throttled after failure")
         _circuit_breaker_open = False
 
     prompt = _build_incident_prompt(log_event)
@@ -364,8 +266,8 @@ async def analyze_log(
             _circuit_breaker_open = False
         return current_res
 
-    except Exception as exc:
+    except Exception:
         if is_live_network:
             _circuit_breaker_open = True
             _circuit_breaker_last_failure = time.monotonic()
-        return _fallback_offline_resolution(log_event, exc, as_regex=log_event.is_unparsed)
+        raise

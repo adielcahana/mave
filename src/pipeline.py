@@ -4,6 +4,7 @@ Integrates wire-speed telemetry filtration, sub-millisecond Rule Tree matching,
 and SRE agent fallback with dynamic caching.
 """
 
+import asyncio
 import time
 from collections.abc import AsyncIterable, AsyncIterator, Iterable
 from typing import Literal
@@ -13,8 +14,8 @@ from pydantic_ai import Agent
 
 from src.agent import _resolve_settings, analyze_log, create_agent
 from src.config import Settings
-from src.rules.engine import RuleTreeEngine
-from src.rules.models import ProblemResolution, ProblemResolutionWithRegex
+from src.rules.engine import RuleTreeEngine, extract_template
+from src.rules.models import LogEvent, ProblemResolution, ProblemResolutionWithRegex
 from src.rules.telemetry_filter import TelemetryFilter
 from src.rules.template_registry import LogTemplateRegistry
 
@@ -27,6 +28,7 @@ __all__ = [
 PipelineStatus = Literal[
     "TELEMETRY_FILTERED",
     "FAST_PATH_HIT",
+    "IN_FLIGHT_ATTACHED",
     "AGENT_RESOLVED",
 ]
 
@@ -74,6 +76,13 @@ class LogPipeline:
         self.template_registry: LogTemplateRegistry = (
             template_registry if template_registry is not None else LogTemplateRegistry()
         )
+        self._in_flight: dict[str, asyncio.Future[ProblemResolution]] = {}
+
+    def _get_dedup_key(self, event: LogEvent) -> str:
+        """Derive canonical deduplication key from event subsystem and message template."""
+        subsys = event.subsystem.strip().lower()
+        template = extract_template(event.message)
+        return f"{subsys}:{template}" if subsys else template
 
     async def process_log(self, raw_line: str) -> PipelineResult:
         """Process a single raw HPC log line through the two-tier pipeline.
@@ -81,8 +90,9 @@ class LogPipeline:
         1. Parses raw line via LogTemplateRegistry (combined regex disjunction or fallback).
         2. Filters routine benign telemetry at wire speed (<0.1ms, $0 cost).
         3. Matches against pre-configured and dynamically learned rules (<0.5ms, $0 cost).
-        4. Dispatches unresolved novel errors to the SRE Agent for grounded diagnosis.
-        5. Dynamically caches resolutions into RuleTreeEngine and registers new templates.
+        4. Deduplicates concurrent in-flight novel error bursts ($0 cost).
+        5. Dispatches unresolved novel errors to the SRE Agent for grounded diagnosis.
+        6. Dynamically caches resolutions into RuleTreeEngine and registers new templates.
         """
         start = time.perf_counter()
 
@@ -112,43 +122,83 @@ class LogPipeline:
                 latency_ms=latency_ms,
             )
 
-        # Step 4: Slow-path SRE agent escalation
-        resolution = await analyze_log(
-            event,
-            agent=self.agent,
-            settings=self.settings,
-        )
+        # Step 4: In-flight burst deduplication
+        dedup_key = self._get_dedup_key(event)
+        if dedup_key in self._in_flight:
+            fut = self._in_flight[dedup_key]
+            try:
+                attached_resolution = await fut
+                latency_ms = (time.perf_counter() - start) * 1000.0
+                return PipelineResult(
+                    log_id=event.log_id,
+                    status="IN_FLIGHT_ATTACHED",
+                    resolution=attached_resolution,
+                    cost_usd=0.0,
+                    latency_ms=latency_ms,
+                )
+            except Exception:
+                pass
 
-        # If unparsed and returned a regex resolution, register new template immediately
-        if event.is_unparsed and isinstance(resolution, ProblemResolutionWithRegex):
-            new_tmpl_id = f"DYNAMIC_{event.subsystem or 'UNPARSED'}_{int(time.time() * 1000)}"
-            self.template_registry.register_template(
-                template_id=new_tmpl_id,
-                regex=resolution.suggested_log_template_regex,
-                persist=False,
+        loop = asyncio.get_running_loop()
+        leader_future: asyncio.Future[ProblemResolution] = loop.create_future()
+        self._in_flight[dedup_key] = leader_future
+
+        try:
+            # Step 5: Slow-path SRE agent escalation
+            resolution = await analyze_log(
+                event,
+                agent=self.agent,
+                settings=self.settings,
             )
 
-        # Step 5: Dynamic rule creation into RuleTreeEngine for subsequent instant hits
-        self.rule_engine.create_rule_from_resolution(event, resolution)
+            # If unparsed and returned a regex resolution, register new template immediately
+            if event.is_unparsed and isinstance(resolution, ProblemResolutionWithRegex):
+                new_tmpl_id = f"DYNAMIC_{event.subsystem or 'UNPARSED'}_{int(time.time() * 1000)}"
+                self.template_registry.register_template(
+                    template_id=new_tmpl_id,
+                    regex=resolution.suggested_log_template_regex,
+                    persist=False,
+                )
 
-        latency_ms = (time.perf_counter() - start) * 1000.0
-        return PipelineResult(
-            log_id=event.log_id,
-            status="AGENT_RESOLVED",
-            resolution=resolution,
-            cost_usd=self.agent_cost_usd,
-            latency_ms=latency_ms,
-        )
+            # Step 6: Dynamic rule creation into RuleTreeEngine for subsequent instant hits
+            self.rule_engine.create_rule_from_resolution(event, resolution)
+
+            if not leader_future.done():
+                leader_future.set_result(resolution)
+
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            return PipelineResult(
+                log_id=event.log_id,
+                status="AGENT_RESOLVED",
+                resolution=resolution,
+                cost_usd=self.agent_cost_usd,
+                latency_ms=latency_ms,
+            )
+        except BaseException as exc:
+            if not leader_future.done():
+                leader_future.set_exception(exc)
+            raise
+        finally:
+            self._in_flight.pop(dedup_key, None)
 
     async def process_logs(
         self,
         logs: Iterable[str],
+        concurrency_limit: int | None = None,
     ) -> list[PipelineResult]:
-        """Process an iterable of log lines sequentially."""
-        results: list[PipelineResult] = []
-        for line in logs:
-            results.append(await self.process_log(line))
-        return results
+        """Process an iterable of log lines concurrently via asyncio."""
+        log_list = list(logs)
+        if not log_list:
+            return []
+        if concurrency_limit and concurrency_limit > 0:
+            sem = asyncio.Semaphore(concurrency_limit)
+
+            async def _worker(line: str) -> PipelineResult:
+                async with sem:
+                    return await self.process_log(line)
+
+            return list(await asyncio.gather(*(_worker(line) for line in log_list)))
+        return list(await asyncio.gather(*(self.process_log(line) for line in log_list)))
 
     async def process_stream(
         self,
