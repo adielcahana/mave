@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from main import main, run_demo, run_evaluate
+from main import analyze_log_lines, main, run_demo, run_evaluate
 from src.agent import ProblemResolution, create_agent
 from src.config import Settings
 from src.pipeline import LogPipeline, PipelineResult
@@ -153,3 +153,53 @@ def test_cli_main_dispatch() -> None:
     ):
         main()
         mock_eval.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_analyze_log_lines_aggregates_stats(test_settings: Settings) -> None:
+    """Verify analyze_log_lines processes lines and computes stats correctly."""
+    lines = [
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )",
+        "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )",
+    ]
+    pipeline = LogPipeline(settings=test_settings)
+    stats = await analyze_log_lines(lines, source_name="Test Stream", pipeline=pipeline)
+
+    assert stats.total_lines == 2
+    assert stats.benign_count == 1
+    assert stats.error_count == 1
+    assert stats.auto_annotated_count == 1
+    assert len(stats.unique_errors) == 1
+
+
+def test_cli_main_single_line_telemetry(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify main() handles a single benign telemetry line via --line."""
+    line = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+    with patch("sys.argv", ["main.py", "--line", line]):
+        main()
+    captured = capsys.readouterr().out
+    assert "Input Log Line" in captured
+    assert "Benign Telemetry" in captured
+
+
+def test_cli_main_single_line_short_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify main() handles a single error log line via -l."""
+    line = "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
+    with patch("sys.argv", ["main.py", "-l", line]):
+        main()
+    captured = capsys.readouterr().out
+    assert "Input Log Line" in captured
+    assert "Actionable Errors" in captured
+    assert "PSU failure" in captured
+
+
+def test_cli_main_single_line_empty() -> None:
+    """Verify main() exits cleanly with code 1 if empty log line is provided."""
+    with (
+        patch("sys.argv", ["main.py", "--line", "   "]),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        main()
+    assert exc_info.value.code == 1

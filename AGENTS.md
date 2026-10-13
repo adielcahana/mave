@@ -121,7 +121,7 @@ mave/
 Always verify the codebase after any modification using Astral's tooling suite:
 
 ```bash
-# 1. Run all unit and integration tests (71 tests passing)
+# 1. Run all unit and integration tests (75 tests passing)
 uv run pytest
 
 # 2. Check static typing (Astral Ty)
@@ -134,6 +134,7 @@ uv run ruff format .
 # 4. Pipeline execution / demo
 uv run python main.py
 uv run python main.py data/HPC.log --limit 500
+uv run python main.py --line "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
 ```
 
 ---

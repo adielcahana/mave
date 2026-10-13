@@ -89,6 +89,9 @@ uv run python main.py data/HPC.log --limit 500
 
 # Ingest any custom log stream
 uv run python main.py path/to/cluster.log
+
+# Process a single log line directly from CLI
+uv run python main.py --line "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
 ```
 
 ### Output Provided

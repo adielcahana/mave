@@ -133,17 +133,14 @@ def load_log_lines(file_path: str | Path, limit: int | None = None) -> list[str]
     return raw_lines
 
 
-async def analyze_log_file(
-    file_path: str | Path,
-    limit: int | None = None,
+async def analyze_log_lines(
+    raw_lines: list[str],
+    source_name: str = "Stream",
     pipeline: LogPipeline | None = None,
 ) -> LogProcessingStats:
-    """Analyze a log file and return quantitative statistics and remedy recommendations."""
-    path = Path(file_path)
-    raw_lines = load_log_lines(path, limit=limit)
-
+    """Analyze a list of log lines and return stats and remedy recommendations."""
     pipe = pipeline or LogPipeline(rule_engine=RuleTreeEngine.with_defaults(rules_path=None))
-    stats = LogProcessingStats(file_name=path.name, total_lines=len(raw_lines))
+    stats = LogProcessingStats(file_name=source_name, total_lines=len(raw_lines))
 
     start_time = time.perf_counter()
 
@@ -173,6 +170,17 @@ async def analyze_log_file(
     stats.throughput_lines_per_sec = (len(raw_lines) / elapsed) if elapsed > 0 else 0.0
 
     return stats
+
+
+async def analyze_log_file(
+    file_path: str | Path,
+    limit: int | None = None,
+    pipeline: LogPipeline | None = None,
+) -> LogProcessingStats:
+    """Analyze a log file and return quantitative statistics and remedy recommendations."""
+    path = Path(file_path)
+    raw_lines = load_log_lines(path, limit=limit)
+    return await analyze_log_lines(raw_lines, source_name=path.name, pipeline=pipeline)
 
 
 def render_stats_dashboard(stats: LogProcessingStats) -> None:
@@ -343,6 +351,19 @@ def render_stats_dashboard(stats: LogProcessingStats) -> None:
                 padding=(1, 2),
             )
             console.print(panel)
+    elif stats.benign_count > 0 and stats.error_count == 0:
+        console.print(
+            Panel(
+                Text(
+                    "✓ Benign Telemetry: Log classified as routine cluster operation.\n"
+                    "Dropped at wire speed (zero incident, zero token cost).",
+                    style="bold green",
+                    justify="center",
+                ),
+                border_style="green",
+                box=box.ROUNDED,
+            )
+        )
 
 
 def run_evaluate(benchmark_path: str = "data/golden_eval.json") -> None:
@@ -379,14 +400,14 @@ async def run_demo() -> None:
 
 
 def main() -> None:
-    """CLI entry point accepting a log file and returning stats and remedies."""
+    """CLI entry point accepting a log file or single log line and returning stats and remedies."""
     parser = argparse.ArgumentParser(
-        description="HPC Automated Problem Resolution Engine — Ingest Log File & Return Remedies",
+        description="HPC Automated Problem Resolution Engine — Ingest Log Stream & Return Remedies",
     )
     parser.add_argument(
         "log_file",
         nargs="?",
-        default="data/golden_eval.json",
+        default=None,
         help="Path to HPC log file (.log, .txt, or .json). Default: data/golden_eval.json",
     )
     parser.add_argument(
@@ -394,6 +415,13 @@ def main() -> None:
         "-f",
         dest="flag_file",
         help="Explicit log file path",
+    )
+    parser.add_argument(
+        "--line",
+        "-l",
+        "--log",
+        dest="log_line",
+        help="Process a single log line directly from CLI",
     )
     parser.add_argument(
         "--limit",
@@ -418,15 +446,41 @@ def main() -> None:
     args = parser.parse_args()
 
     # Backwards compatibility dispatch for tests
-    if args.evaluate or args.log_file in ("evaluate", "eval"):
+    if args.evaluate or (args.log_file and args.log_file in ("evaluate", "eval")):
         run_evaluate("data/golden_eval.json")
         return
 
-    if args.demo or args.log_file == "demo":
+    if args.demo or (args.log_file and args.log_file == "demo"):
         asyncio.run(run_demo())
         return
 
-    target_file = args.flag_file or args.log_file
+    if args.log_line is not None:
+        log_line = args.log_line.strip()
+        if not log_line:
+            console.print("[bold red]Error:[/] Provided log line is empty.")
+            sys.exit(1)
+
+        render_header(subtitle="Processing single log line from CLI")
+        console.print(
+            Panel(
+                Text(log_line, style="bright_white"),
+                title="[bold cyan]Input Log Line[/]",
+                border_style="cyan",
+                box=box.ROUNDED,
+            )
+        )
+        console.print()
+
+        with console.status(
+            "[bold cyan]Processing log line...[/]",
+            spinner="dots",
+        ):
+            stats = asyncio.run(analyze_log_lines([log_line], source_name="CLI Input"))
+
+        render_stats_dashboard(stats)
+        return
+
+    target_file = args.flag_file or args.log_file or "data/golden_eval.json"
 
     render_header(subtitle=f"Ingesting log stream from: {target_file}")
 
