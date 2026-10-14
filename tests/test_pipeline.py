@@ -352,3 +352,57 @@ def test_log_processing_stats_recording_and_timing(mock_resolution: ProblemResol
 
     assert stats.elapsed_time_s >= 0.005
     assert stats.throughput_lines_per_sec > 0.0
+
+
+@pytest.mark.anyio
+async def test_pipeline_custom_callback_invoked(test_settings: Settings) -> None:
+    """Verify registered callbacks fire on every processed log event."""
+    received: list[PipelineResult] = []
+    pipeline = LogPipeline(settings=test_settings, on_result=received.append)
+
+    line = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+    await pipeline.process_log(line)
+
+    assert len(received) == 1
+    assert received[0].status == "TELEMETRY_FILTERED"
+
+
+@pytest.mark.anyio
+async def test_pipeline_collect_stats_context_manager(test_settings: Settings) -> None:
+    """Verify collect_stats context manager hooks callbacks and finalizes stats."""
+    pipeline = LogPipeline(settings=test_settings)
+    fan_line = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+    psu_line = "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
+    lines = [fan_line, psu_line]
+
+    with pipeline.collect_stats(source_name="Test Context", total_lines=len(lines)) as stats:
+        await pipeline.process_logs(lines)
+
+    assert stats.file_name == "Test Context"
+    assert stats.total_lines == 2
+    assert stats.benign_count == 1
+    assert stats.error_count == 1
+    assert stats.auto_annotated_count == 1
+    assert stats.elapsed_time_s > 0.0
+    assert stats.throughput_lines_per_sec > 0.0
+
+
+@pytest.mark.anyio
+async def test_pipeline_analyze_method(test_settings: Settings) -> None:
+    """Verify pipeline.analyze returns complete LogProcessingStats."""
+    pipeline = LogPipeline(settings=test_settings)
+    fan_line = (
+        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
+    )
+    psu_line = "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
+    lines = [fan_line, psu_line]
+
+    stats = await pipeline.analyze(lines, source_name="Stream Test")
+    assert stats.total_lines == 2
+    assert stats.benign_count == 1
+    assert stats.error_count == 1
+    assert stats.auto_annotated_count == 1

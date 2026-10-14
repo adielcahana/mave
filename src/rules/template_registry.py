@@ -20,6 +20,38 @@ logger = logging.getLogger(__name__)
 DEFAULT_LOG_TEMPLATES_PATH = Path("resources/log_templates.json")
 
 
+def derive_format_string(pattern: re.Pattern[Any], sample_raw_log: str) -> str:
+    """Derive a format template reconstructing sample_raw_log from named capture groups."""
+    match = pattern.search(sample_raw_log)
+    if not match or not pattern.groupindex:
+        return sample_raw_log
+
+    spans: list[tuple[int, int, str]] = []
+    for name, idx in pattern.groupindex.items():
+        span = match.span(idx)
+        if span != (-1, -1):
+            spans.append((span[0], span[1], name))
+
+    spans.sort(key=lambda x: (x[0], -x[1]))
+
+    filtered_spans: list[tuple[int, int, str]] = []
+    last_end = -1
+    for start, end, name in spans:
+        if start >= last_end:
+            filtered_spans.append((start, end, name))
+            last_end = end
+
+    res_parts: list[str] = []
+    curr = 0
+    for start, end, name in filtered_spans:
+        res_parts.append(sample_raw_log[curr:start])
+        res_parts.append(f"{{{name}}}")
+        curr = end
+    res_parts.append(sample_raw_log[curr:])
+
+    return "".join(res_parts)
+
+
 class LogTemplateRegistry:
     """Registry of log templates compiled into a combined regex disjunction.
 
@@ -101,6 +133,19 @@ class LogTemplateRegistry:
         combined_pattern = "|".join(branches)
         self._compiled_regex = re.compile(combined_pattern)
 
+    def get_known_group_names(self) -> list[str]:
+        """Return unique sorted list of named capture groups across registered templates."""
+        names: set[str] = set()
+        for item in self.templates:
+            raw_regex = item.get("regex", "").strip()
+            if raw_regex:
+                try:
+                    rx = re.compile(raw_regex)
+                    names.update(rx.groupindex.keys())
+                except Exception:
+                    pass
+        return sorted(names)
+
     def parse(self, raw_line: str) -> LogEvent:
         """Parse a raw log line using combined regex disjunction or fallback.
 
@@ -119,12 +164,24 @@ class LogTemplateRegistry:
                         break
 
                 if matched_branch_id is not None:
+                    matched_template = self._branch_map[matched_branch_id]
+                    format_str = str(matched_template.get("format_string", ""))
                     prefix = f"{matched_branch_id}__"
                     extracted: dict[str, Any] = {}
                     for group_name, val in match.groupdict().items():
                         if group_name.startswith(prefix) and val is not None:
                             field_name = group_name[len(prefix) :]
                             extracted[field_name] = val
+
+                    # If format_string was not pre-stored on template, derive it from this match
+                    if not format_str:
+                        branch_rx_str = matched_template.get("regex", "")
+                        if branch_rx_str:
+                            try:
+                                branch_rx = re.compile(branch_rx_str)
+                                format_str = derive_format_string(branch_rx, raw_line)
+                            except Exception:
+                                format_str = ""
 
                     # Cast numeric fields
                     timestamp = 0
@@ -141,6 +198,27 @@ class LogTemplateRegistry:
                         except ValueError:
                             flag = 0
 
+                    standard_field_names = {
+                        "log_id",
+                        "node",
+                        "subsystem",
+                        "event_type",
+                        "timestamp",
+                        "flag",
+                        "message",
+                        "raw",
+                        "format_string",
+                        "is_unparsed",
+                    }
+                    extra_fields = {
+                        k: v for k, v in extracted.items() if k not in standard_field_names
+                    }
+
+                    # Message falls back to raw_line if no specific 'message' group is present
+                    msg_val = str(extracted.get("message", ""))
+                    if not msg_val:
+                        msg_val = raw_line
+
                     return LogEvent(
                         log_id=str(extracted.get("log_id", "")),
                         node=str(extracted.get("node", "")),
@@ -148,9 +226,11 @@ class LogTemplateRegistry:
                         event_type=str(extracted.get("event_type", "")),
                         timestamp=timestamp,
                         flag=flag,
-                        message=str(extracted.get("message", "")),
+                        message=msg_val,
                         raw=raw_line,
+                        format_string=format_str,
                         is_unparsed=False,
+                        **extra_fields,
                     )
 
         # Fallback to wire-speed normalizer
@@ -158,19 +238,33 @@ class LogTemplateRegistry:
         event.is_unparsed = True
         return event
 
-    def register_template(self, template_id: str, regex: str, persist: bool = True) -> None:
+    def register_template(
+        self,
+        template_id: str,
+        regex: str,
+        format_string: str = "",
+        sample_raw_log: str = "",
+        persist: bool = True,
+    ) -> None:
         """Register a new template dynamically and immediately recompile.
 
         Appends new template to in-memory list, immediately recompiles the combined
         regex so it is available immediately, and optionally writes to the json file.
         """
-        new_entry = {
+        if not format_string and sample_raw_log:
+            try:
+                rx = re.compile(regex)
+                format_string = derive_format_string(rx, sample_raw_log)
+            except Exception:
+                pass
+
+        new_entry: dict[str, Any] = {
             "template_id": template_id,
             "regex": regex,
         }
-        # Prepend or append? The user requirements say:
-        # "Appends new template to in-memory list, immediately recompiles the combined regex"
-        # However, if it's more specific or added dynamically, let's append it as requested.
+        if format_string:
+            new_entry["format_string"] = format_string
+
         self.templates.append(new_entry)
         self._compile_disjunction()
 

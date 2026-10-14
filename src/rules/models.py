@@ -3,7 +3,7 @@
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 ValidationStatus = Literal["PENDING", "VALIDATED", "REJECTED"]
 
@@ -31,9 +31,17 @@ class ProblemResolutionWithRegex(ProblemResolution):
     """Structured resolution schema with suggested log template regex for unparsed logs."""
 
     suggested_log_template_regex: str = Field(
+        default="",
         description=(
-            "Python regular expression with named capture groups to parse this unparsed "
-            "log format. MUST include named groups: (?P<subsystem>...) and (?P<message>...)."
+            "Python regular expression with named capture groups (?P<name>...) to parse this "
+            "unparsed log format."
+        ),
+    )
+    format_string: str = Field(
+        default="",
+        description=(
+            "Optional format string (e.g. '{timestamp} {node} {subsystem}: {message}') "
+            "using named capture group keys to reconstruct the original raw log line."
         ),
     )
 
@@ -82,6 +90,8 @@ class Rule(BaseModel):
 class LogEvent(BaseModel):
     """Normalized structured representation of an HPC log stream event."""
 
+    model_config = ConfigDict(extra="allow")
+
     log_id: str = Field(default="", description="Unique identifier of the log entry")
     node: str = Field(default="", description="Cluster node identifier (e.g., node-25)")
     subsystem: str = Field(default="", description="Subsystem or daemon reporting the event")
@@ -90,6 +100,10 @@ class LogEvent(BaseModel):
     flag: int = Field(default=0, description="Log flag or status code")
     message: str = Field(default="", description="Normalized message body")
     raw: str = Field(default="", description="Original unparsed log line")
+    format_string: str = Field(
+        default="",
+        description="Format string using named capture groups to reconstruct the original log",
+    )
     is_unparsed: bool = Field(
         default=False,
         description="Whether log was unparsed by registered templates",
@@ -105,6 +119,7 @@ class LogEvent(BaseModel):
         flag: int = 0,
         message: str = "",
         raw: str = "",
+        format_string: str = "",
         is_unparsed: bool = False,
         **data: Any,
     ) -> None:
@@ -117,6 +132,7 @@ class LogEvent(BaseModel):
             or flag
             or message
             or raw
+            or format_string
             or is_unparsed
         ):
             data.setdefault("log_id", log_id)
@@ -127,5 +143,16 @@ class LogEvent(BaseModel):
             data.setdefault("flag", flag)
             data.setdefault("message", message)
             data.setdefault("raw", raw)
+            data.setdefault("format_string", format_string)
             data.setdefault("is_unparsed", is_unparsed)
         super().__init__(**data)
+
+    def reconstruct(self) -> str:
+        """Reconstruct the original raw log line using format_string and key-value fields."""
+        if self.format_string:
+            try:
+                data = self.model_dump()
+                return self.format_string.format_map(data)
+            except Exception:
+                pass
+        return self.raw

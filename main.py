@@ -8,9 +8,8 @@ import os
 import re
 import sys
 import time
-from collections.abc import Generator, Iterable
+from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 
 # Suppress Pydantic-AI ASCII banner for clean TUI rendering
@@ -26,64 +25,14 @@ from rich.table import Table
 from rich.text import Text
 
 from src.evaluation import evaluate_benchmark
-from src.pipeline import LogPipeline, PipelineResult
+from src.pipeline import LogPipeline, LogProcessingStats
 from src.rules.engine import RuleTreeEngine
 
 console = Console()
 
 
-@dataclass
-class LogProcessingStats:
-    """Quantitative stats and remedy recommendations for a processed log stream."""
-
-    file_name: str = ""
-    total_lines: int = 0
-    benign_count: int = 0
-    error_count: int = 0
-    auto_annotated_count: int = 0
-    llm_needed_count: int = 0
-    total_cost_usd: float = 0.0
-    elapsed_time_s: float = 0.0
-    throughput_lines_per_sec: float = 0.0
-    unique_errors: dict[str, tuple[PipelineResult, int]] = field(default_factory=dict)
-
-    def record_result(self, result: PipelineResult) -> None:
-        """Accumulate counts, costs, and deduplicated errors from a pipeline result."""
-        self.total_cost_usd += result.cost_usd
-
-        if result.status == "TELEMETRY_FILTERED":
-            self.benign_count += 1
-            return
-
-        self.error_count += 1
-        if result.status in ("FAST_PATH_HIT", "IN_FLIGHT_ATTACHED"):
-            self.auto_annotated_count += 1
-        elif result.status == "AGENT_RESOLVED":
-            self.llm_needed_count += 1
-
-        if result.resolution:
-            key = result.resolution.root_cause.strip()
-            if key in self.unique_errors:
-                prev_res, count = self.unique_errors[key]
-                self.unique_errors[key] = (prev_res, count + 1)
-            else:
-                self.unique_errors[key] = (result, 1)
-
-    def record_results(self, results: Iterable[PipelineResult]) -> None:
-        """Accumulate metrics across an iterable of pipeline results."""
-        for result in results:
-            self.record_result(result)
-
-    def finalize(self, elapsed_seconds: float) -> None:
-        """Finalize execution timing and throughput statistics."""
-        self.elapsed_time_s = elapsed_seconds
-        self.throughput_lines_per_sec = (
-            (self.total_lines / elapsed_seconds) if elapsed_seconds > 0 else 0.0
-        )
-
-
 @contextmanager
-def track_execution_timing(stats: LogProcessingStats) -> Generator[None]:
+def track_execution_timing(stats: LogProcessingStats) -> Generator[None, None, None]:
     """Context manager to measure execution latency and throughput on stats."""
     start = time.perf_counter()
     try:
@@ -179,48 +128,26 @@ def load_log_lines(file_path: str | Path, limit: int | None = None) -> list[str]
     return raw_lines
 
 
-async def _execute_pipeline(
-    pipeline: LogPipeline,
-    raw_lines: list[str],
-    concurrency_limit: int | None = None,
-) -> list[PipelineResult]:
-    """Execute log processing pipeline concurrently across raw lines."""
-    if hasattr(pipeline, "process_logs") and callable(pipeline.process_logs):
-        return await pipeline.process_logs(raw_lines, concurrency_limit=concurrency_limit)
-
-    if concurrency_limit and concurrency_limit > 0:
-        sem = asyncio.Semaphore(concurrency_limit)
-
-        async def _bounded(line: str) -> PipelineResult:
-            async with sem:
-                return await pipeline.process_log(line)
-
-        return list(await asyncio.gather(*(_bounded(line) for line in raw_lines)))
-    return list(await asyncio.gather(*(pipeline.process_log(line) for line in raw_lines)))
-
-
 async def analyze_log_lines(
     raw_lines: list[str],
     source_name: str = "Stream",
     pipeline: LogPipeline | None = None,
-    concurrency_limit: int | None = None,
+    concurrency_limit: int | None = 5,
 ) -> LogProcessingStats:
     """Analyze a list of log lines concurrently via asyncio and return stats and remedies."""
-    pipe = pipeline or LogPipeline(rule_engine=RuleTreeEngine.with_defaults(rules_path=None))
-    stats = LogProcessingStats(file_name=source_name, total_lines=len(raw_lines))
-
-    with track_execution_timing(stats):
-        results = await _execute_pipeline(pipe, raw_lines, concurrency_limit=concurrency_limit)
-        stats.record_results(results)
-
-    return stats
+    pipe = pipeline or LogPipeline()
+    return await pipe.analyze(
+        raw_lines,
+        source_name=source_name,
+        concurrency_limit=concurrency_limit,
+    )
 
 
 async def analyze_log_file(
     file_path: str | Path,
     limit: int | None = None,
     pipeline: LogPipeline | None = None,
-    concurrency_limit: int | None = None,
+    concurrency_limit: int | None = 5,
 ) -> LogProcessingStats:
     """Analyze a log file and return quantitative statistics and remedy recommendations."""
     path = Path(file_path)
@@ -484,8 +411,8 @@ def main() -> None:
         "--concurrency",
         "-c",
         type=int,
-        default=None,
-        help="Maximum concurrent asyncio tasks for log processing (default: unbounded)",
+        default=5,
+        help="Maximum concurrent asyncio tasks for log processing (default: 5)",
     )
     parser.add_argument(
         "--evaluate",

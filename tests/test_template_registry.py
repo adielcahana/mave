@@ -9,14 +9,16 @@ import pytest
 from pydantic_ai.models.test import TestModel
 
 from src.agent import (
+    _build_incident_prompt,
     analyze_log,
     create_agent,
+    reset_circuit_breaker,
     validate_suggested_regex,
 )
 from src.config import Settings
 from src.pipeline import LogPipeline
 from src.rules.models import LogEvent, ProblemResolutionWithRegex
-from src.rules.template_registry import LogTemplateRegistry
+from src.rules.template_registry import LogTemplateRegistry, derive_format_string
 
 
 def test_log_templates_json_exists_and_valid() -> None:
@@ -76,6 +78,11 @@ def test_template_registry_single_pass_and_fallback(tmp_path: Path) -> None:
     assert event_rfc.node == "hpc-head"
     assert event_rfc.subsystem == "slurmctld"
     assert event_rfc.message == "job 998 failed"
+    # Extra capture groups preserved via Pydantic extra='allow'
+    assert event_rfc.model_extra is not None
+    assert event_rfc.model_extra["priority"] == "165"
+    assert event_rfc.model_extra["procid"] == "1234"
+    assert event_rfc.model_extra["msgid"] == "ID47"
 
     # 3. Unparsed line falls back to normalizer and sets is_unparsed=True
     unparsed_line = "CUSTOM_LOG 2026-10-10 unexpected format syntax error code 55"
@@ -111,7 +118,7 @@ def test_template_registry_dynamic_registration(tmp_path: Path) -> None:
 
 
 def test_validate_suggested_regex() -> None:
-    """Verify validate_suggested_regex validates syntax, matching, and required groups."""
+    """Verify validate_suggested_regex validates syntax, matching, groups, and format."""
     sample_log = "2026-10-10 [storage_engine] Disk I/O timeout on volume /data"
 
     # 1. Invalid regex syntax
@@ -124,19 +131,33 @@ def test_validate_suggested_regex() -> None:
     assert valid is False
     assert "failed to match the incoming raw log line" in err
 
-    # 3. Missing required groups (?P<subsystem>...) and (?P<message>...)
+    # 3. No named capture groups at all
+    valid, err = validate_suggested_regex(r"^\S+\s+\[\S+\]\s+.*$", sample_log)
+    assert valid is False
+    assert "contains no named capture groups" in err
+
+    # 4. Arbitrary named groups (no required subsystem or message)
     valid, err = validate_suggested_regex(
-        r"^(?P<timestamp>\S+)\s+\[(?P<subsystem>\S+)\]\s+.*$",
+        r"^(?P<time>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<payload>.*)$",
         sample_log,
     )
-    assert valid is False
-    assert "missing required named capture groups" in err
-    assert "message" in err
+    assert valid is True
+    assert err == "OK"
 
-    # 4. Valid syntax, match, and groups
+    # 5. Format string with missing reference
     valid, err = validate_suggested_regex(
-        r"^(?P<timestamp>\S+)\s+\[(?P<subsystem>[^\]]+)\]\s+(?P<message>.*)$",
+        r"^(?P<time>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<payload>.*)$",
         sample_log,
+        format_string="{time} [{missing_key}] {payload}",
+    )
+    assert valid is False
+    assert "references group" in err
+
+    # 6. Format string valid
+    valid, err = validate_suggested_regex(
+        r"^(?P<time>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<payload>.*)$",
+        sample_log,
+        format_string="{time} [{tag}] {payload}",
     )
     assert valid is True
     assert err == "OK"
@@ -145,6 +166,7 @@ def test_validate_suggested_regex() -> None:
 @pytest.mark.anyio
 async def test_analyze_log_with_unparsed_log_and_retry_feedback() -> None:
     """Verify analyze_log uses ProblemResolutionWithRegex and retries if regex invalid."""
+    reset_circuit_breaker()
     sample_raw = "MY_SUBSYS: error code 42 fatal fault"
     unparsed_event = LogEvent(
         raw=sample_raw,
@@ -158,21 +180,21 @@ async def test_analyze_log_with_unparsed_log_and_retry_feedback() -> None:
         model_name="openai/gpt-oss-20b",
     )
 
-    # Agent first returns invalid regex (missing message group), then corrected regex
+    # Agent first returns invalid regex (no named capture groups), then corrected regex
     attempt = 0
 
     def mock_model_output(*args: Any, **kwargs: Any) -> ProblemResolutionWithRegex:
         nonlocal attempt
         attempt += 1
         if attempt == 1:
-            # Bad regex: missing ?P<message>
+            # Bad regex: no named capture groups
             return ProblemResolutionWithRegex(
                 error_summary="Fatal error in custom subsys",
                 root_cause="Hardware error code 42",
                 severity="CRITICAL",
                 remediation_steps=["Reboot subsystem"],
                 citations_and_reasons=["Custom Runbook"],
-                suggested_log_template_regex=r"^(?P<subsystem>MY_SUBSYS):\s+error.*$",
+                suggested_log_template_regex=r"^MY_SUBSYS:\s+error.*$",
             )
         # Correct regex
         return ProblemResolutionWithRegex(
@@ -181,7 +203,8 @@ async def test_analyze_log_with_unparsed_log_and_retry_feedback() -> None:
             severity="CRITICAL",
             remediation_steps=["Reboot subsystem"],
             citations_and_reasons=["Custom Runbook"],
-            suggested_log_template_regex=r"^(?P<subsystem>MY_SUBSYS):\s+(?P<message>.*)$",
+            suggested_log_template_regex=r"^(?P<service>MY_SUBSYS):\s+(?P<details>.*)$",
+            format_string="{service}: {details}",
         )
 
     # Use a TestModel returning outputs
@@ -200,20 +223,25 @@ async def test_analyze_log_with_unparsed_log_and_retry_feedback() -> None:
             MockRunResult(mock_model_output()),
         ]
 
-        agent = create_agent(settings=test_settings)
-        resolution = await analyze_log(unparsed_event, agent=agent, settings=test_settings)
+        try:
+            agent = create_agent(settings=test_settings)
+            resolution = await analyze_log(unparsed_event, agent=agent, settings=test_settings)
 
-        assert isinstance(resolution, ProblemResolutionWithRegex)
-        assert (
-            resolution.suggested_log_template_regex
-            == r"^(?P<subsystem>MY_SUBSYS):\s+(?P<message>.*)$"
-        )
-        assert mock_run.call_count == 2  # 1 initial + 1 retry
+            assert isinstance(resolution, ProblemResolutionWithRegex)
+            assert (
+                resolution.suggested_log_template_regex
+                == r"^(?P<service>MY_SUBSYS):\s+(?P<details>.*)$"
+            )
+            assert resolution.format_string == "{service}: {details}"
+            assert mock_run.call_count == 2  # 1 initial + 1 retry
+        finally:
+            reset_circuit_breaker()
 
 
 @pytest.mark.anyio
 async def test_pipeline_dynamic_template_registration_on_unparsed_log(tmp_path: Path) -> None:
     """Verify pipeline registers dynamic regex from ProblemResolutionWithRegex for unparsed logs."""
+    reset_circuit_breaker()
     tmpl_file = tmp_path / "pipe_templates.json"
     with open(tmpl_file, "w", encoding="utf-8") as f:
         json.dump([], f)
@@ -257,3 +285,80 @@ async def test_pipeline_dynamic_template_registration_on_unparsed_log(tmp_path: 
     assert event2.is_unparsed is False
     assert event2.subsystem == "STORAGE_CONTROLLER"
     assert event2.message == "RAID degraded on controller 1"
+
+
+def test_log_event_allows_extra_dynamic_fields(tmp_path: Path) -> None:
+    """Verify LogEvent accepts arbitrary extra fields and pipeline/agent preserves them."""
+    # 1. Direct instantiation
+    event = LogEvent(
+        log_id="101",
+        node="gpu-node-04",
+        subsystem="slurm",
+        event_type="job_fail",
+        job_id="99812",
+        cluster="capitol",
+        exit_code=137,
+    )
+    assert event.model_extra is not None
+    assert event.model_extra["job_id"] == "99812"
+    assert event.model_extra["cluster"] == "capitol"
+    assert event.model_extra["exit_code"] == 137
+    dumped = event.model_dump()
+    assert dumped["job_id"] == "99812"
+    assert dumped["exit_code"] == 137
+
+    # 2. Extra fields in incident prompt
+    prompt = _build_incident_prompt(event)
+    assert "- job_id: 99812" in prompt
+    assert "- cluster: capitol" in prompt
+    assert "- exit_code: 137" in prompt
+
+    # 3. Dynamic template extraction into LogEvent extra fields
+    tmpl_file = tmp_path / "custom_tmpl.json"
+    registry = LogTemplateRegistry(templates_path=tmpl_file)
+    registry.register_template(
+        "K8S_CONTAINER",
+        r"^\[(?P<cluster>[^\]]+)\]\s+(?P<subsystem>\S+)\s+pod/(?P<pod_name>\S+)\s+PID:(?P<pid>\d+)\s+(?P<message>.*)$",
+    )
+    raw = "[us-east-1] k8s_runtime pod/nginx-789 PID:4123 connection reset by peer"
+    parsed_event = registry.parse(raw)
+    assert parsed_event.is_unparsed is False
+    assert parsed_event.subsystem == "k8s_runtime"
+    assert parsed_event.message == "connection reset by peer"
+    assert parsed_event.model_extra is not None
+    assert parsed_event.model_extra["cluster"] == "us-east-1"
+    assert parsed_event.model_extra["pod_name"] == "nginx-789"
+    assert parsed_event.model_extra["pid"] == "4123"
+    # Format string restoration
+    assert parsed_event.format_string != ""
+    assert parsed_event.reconstruct() == raw
+
+
+def test_format_string_restoration_and_group_names(tmp_path: Path) -> None:
+    """Verify derive_format_string, get_known_group_names, and LogEvent.reconstruct."""
+    import re
+
+    pattern = re.compile(
+        r"^\[(?P<zone>\S+)\]\s+(?P<svc>\S+):\s+(?P<err_code>\d+)\s+-(?P<details>.*)$"
+    )
+    raw = "[us-west-2] auth_proxy: 504 -Gateway Timeout on upstream"
+    derived_fmt = derive_format_string(pattern, raw)
+    assert derived_fmt == "[{zone}] {svc}: {err_code} -{details}"
+
+    # LogEvent reconstruction
+    event = LogEvent(
+        raw=raw,
+        format_string=derived_fmt,
+        zone="us-west-2",
+        svc="auth_proxy",
+        err_code=504,
+        details="Gateway Timeout on upstream",
+    )
+    assert event.reconstruct() == raw
+
+    # Known group names inspection
+    registry = LogTemplateRegistry(templates_path=tmp_path / "t.json")
+    registry.register_template("T1", r"^(?P<alpha>\w+)\s+(?P<beta>\w+)$")
+    registry.register_template("T2", r"^(?P<beta>\w+)\s+(?P<gamma>\w+)$")
+    names = registry.get_known_group_names()
+    assert names == ["alpha", "beta", "gamma"]

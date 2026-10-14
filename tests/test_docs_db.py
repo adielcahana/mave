@@ -221,3 +221,72 @@ def test_load_runbooks_custom_path_and_not_found(tmp_path: Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         load_runbooks(tmp_path / "nonexistent.json")
+
+
+def test_add_and_save_runbook_entry(tmp_path: Path) -> None:
+    from src.knowledge.docs_db import add_runbook_entry
+
+    custom_entry = RunbookEntry(
+        subsystem="slurm_scheduler",
+        scenario="Slurm controller unresponsive",
+        root_cause="Slurmctld daemon thread deadlock during heavy job throughput",
+        remediation_steps=("Restart slurmctld service", "Check /var/log/slurmctld.log"),
+        citation="[HPC Community: slurm-deadlock-v1.0]",
+        keywords=("slurm", "slurmctld", "deadlock"),
+        event_type="scheduler",
+    )
+    save_file = tmp_path / "saved_runbooks.json"
+    add_runbook_entry(custom_entry, persist=True, path=save_file)
+
+    assert save_file.is_file()
+    with open(save_file, encoding="utf-8") as f:
+        data = json.load(f)
+    assert any(item["subsystem"] == "slurm_scheduler" for item in data)
+
+    # Verify querying picks up new subsystem and keywords
+    retrieved = query_subsystem_docs("slurm_scheduler", "deadlock")
+    assert "Slurm controller unresponsive" in retrieved
+    assert "Restart slurmctld service" in retrieved
+
+
+def test_create_runbook_from_resolution(tmp_path: Path) -> None:
+    from src.knowledge.docs_db import create_runbook_from_resolution
+    from src.rules.models import LogEvent, ProblemResolution
+
+    event = LogEvent(
+        log_id="999001",
+        node="node-101",
+        subsystem="infiniband_fabric",
+        event_type="port_error",
+        timestamp=1074220000,
+        flag=1,
+        message="ib0 port link down symbol error rate exceeded",
+        raw=(
+            "999001 node-101 infiniband_fabric port_error 1074220000 1 "
+            "ib0 port link down symbol error rate exceeded"
+        ),
+    )
+    resolution = ProblemResolution(
+        error_summary="InfiniBand fabric link degradation",
+        root_cause=(
+            "High physical symbol error rate on HCA port 1 caused by transceiver dirty optics"
+        ),
+        severity="HIGH",
+        remediation_steps=[
+            "Clean fiber optic connector pins on HCA port 1",
+            "Perform ibportstate reset",
+        ],
+        citations_and_reasons=["[Web Source: Mellanox IB Troubleshooting Guide]"],
+    )
+
+    save_file = tmp_path / "learned_runbooks.json"
+    entry = create_runbook_from_resolution(event, resolution, persist=True, path=save_file)
+
+    assert entry.subsystem == "infiniband_fabric"
+    assert "port_error" in entry.keywords or "symbol" in entry.keywords
+    assert save_file.is_file()
+
+    # Querying docs for new entry
+    doc = query_subsystem_docs("infiniband_fabric", "symbol")
+    assert "InfiniBand fabric link degradation" in doc
+    assert "Clean fiber optic connector pins" in doc

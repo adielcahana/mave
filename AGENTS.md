@@ -53,7 +53,8 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
 - `src/pipeline.py`: Two-tier streaming orchestrator (`HPCStreamPipeline`) connecting ingestion, filtering, rules, and agent escalation.
 - `src/evaluation.py`: Quantitative benchmark evaluation suite measuring classification accuracy, LLM bypass rate, and latency SLAs.
 - `src/split_data.py`: Deterministic dataset partitioning utility.
-- `src/knowledge/docs_db.py`: In-memory vectorless knowledge base indexing LANL cluster runbooks and subsystem documentation.
+- `src/knowledge/docs_db.py`: In-memory knowledge base indexing LANL cluster runbooks with dynamic learning and persistence.
+- `src/knowledge/search.py`: External technical documentation retrieval (DuckDuckGo web search and local Markdown/text docs scanner).
 - `src/rules/engine.py`: High-throughput regex rule matching engine (`RuleTreeEngine`) with dynamic LRU caching.
 - `src/rules/models.py`: Strongly-typed domain models (`LogEvent`, `Rule`, `ProblemResolution`, `RemediationStep`, `SeverityLevel`).
 - `src/rules/normalizer.py`: High-performance semi-structured log line parser.
@@ -96,7 +97,8 @@ mave/
 │   ├── split_data.py     # Train/Val/Test data splitter
 │   ├── knowledge/
 │   │   ├── __init__.py
-│   │   └── docs_db.py    # Subsystem runbooks & knowledge base
+│   │   ├── docs_db.py    # Subsystem runbooks & knowledge base
+│   │   └── search.py     # Web search & local docs retrieval tools
 │   └── rules/
 │       ├── __init__.py
 │       ├── engine.py     # RuleTreeEngine & resolution cache
@@ -111,6 +113,7 @@ mave/
     ├── test_normalizer.py        # Log parsing & header extraction tests
     ├── test_pipeline.py          # Stream pipeline, caching & debouncing tests
     ├── test_rule_engine.py       # Rule matching, indexing & triage tests
+    ├── test_search.py            # External web search & local docs retrieval tests
     └── test_template_registry.py # Regex template extraction & registry tests
 ```
 
@@ -121,7 +124,7 @@ mave/
 Always verify the codebase after any modification using Astral's tooling suite:
 
 ```bash
-# 1. Run all unit and integration tests (81 tests passing)
+# 1. Run all unit and integration tests (93 tests passing)
 uv run pytest
 
 # 2. Check static typing (Astral Ty)

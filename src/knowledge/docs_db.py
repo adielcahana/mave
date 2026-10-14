@@ -3,14 +3,20 @@
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+from src.rules.models import LogEvent, ProblemResolution
 
 __all__ = [
     "RunbookEntry",
+    "add_runbook_entry",
+    "create_runbook_from_resolution",
     "get_all_runbooks",
     "list_known_subsystems",
     "load_runbooks",
     "query_subsystem_docs",
     "resolve_subsystem",
+    "save_runbooks",
 ]
 
 
@@ -31,6 +37,18 @@ class RunbookEntry:
             object.__setattr__(self, "remediation_steps", tuple(self.remediation_steps))
         if not isinstance(self.keywords, tuple):
             object.__setattr__(self, "keywords", tuple(self.keywords))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert entry to JSON-serializable dictionary."""
+        return {
+            "subsystem": self.subsystem,
+            "scenario": self.scenario,
+            "root_cause": self.root_cause,
+            "remediation_steps": list(self.remediation_steps),
+            "citation": self.citation,
+            "keywords": list(self.keywords),
+            "event_type": self.event_type,
+        }
 
     def format_text(self) -> str:
         """Render the runbook entry into standard structured markdown."""
@@ -130,6 +148,76 @@ def list_known_subsystems() -> list[str]:
 def get_all_runbooks() -> list[RunbookEntry]:
     """Return all documented runbook entries in the knowledge base."""
     return list(_RUNBOOKS)
+
+
+def save_runbooks(path: Path | str | None = None) -> None:
+    """Serialize and save the current in-memory runbooks to a JSON file."""
+    runbooks_path = _resolve_runbooks_path(path)
+    data = [entry.to_dict() for entry in _RUNBOOKS]
+    runbooks_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(runbooks_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def add_runbook_entry(
+    entry: RunbookEntry,
+    persist: bool = False,
+    path: Path | str | None = None,
+) -> None:
+    """Add a new runbook entry to the knowledge base and optionally persist to disk."""
+    global KNOWN_SUBSYSTEMS
+    existing_idx = next(
+        (
+            i
+            for i, e in enumerate(_RUNBOOKS)
+            if e.subsystem == entry.subsystem and e.scenario == entry.scenario
+        ),
+        None,
+    )
+    if existing_idx is not None:
+        _RUNBOOKS[existing_idx] = entry
+    else:
+        _RUNBOOKS.append(entry)
+    KNOWN_SUBSYSTEMS = _derive_known_subsystems(_RUNBOOKS)
+    if persist:
+        save_runbooks(path)
+
+
+def create_runbook_from_resolution(
+    event: LogEvent,
+    resolution: ProblemResolution,
+    persist: bool = False,
+    path: Path | str | None = None,
+) -> RunbookEntry:
+    """Synthesize a new RunbookEntry from an agent ProblemResolution and register it."""
+    subsystem = resolve_subsystem(event.subsystem) if event.subsystem else "general"
+    citation = (
+        resolution.citations_and_reasons[0]
+        if resolution.citations_and_reasons
+        else f"[Learned SRE Runbook: {subsystem}]"
+    )
+
+    kw_candidates: set[str] = set()
+    if event.event_type and event.event_type != "*":
+        kw_candidates.add(event.event_type.lower())
+    if event.flag and str(event.flag) != "-":
+        kw_candidates.add(str(event.flag).lower())
+    for word in event.message.split():
+        cleaned_w = word.strip("=(),.:;\"'[]{}<>").lower()
+        if len(cleaned_w) >= 3 and not cleaned_w.isdigit():
+            kw_candidates.add(cleaned_w)
+
+    entry = RunbookEntry(
+        subsystem=subsystem,
+        scenario=resolution.error_summary or f"Incident in {subsystem}",
+        root_cause=resolution.root_cause,
+        remediation_steps=tuple(resolution.remediation_steps),
+        citation=citation,
+        keywords=tuple(sorted(list(kw_candidates))[:8]),
+        event_type=event.event_type or "*",
+    )
+    add_runbook_entry(entry, persist=persist, path=path)
+    return entry
 
 
 def resolve_subsystem(subsystem: str) -> str:

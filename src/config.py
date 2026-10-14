@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     api_key: str
     model_name: str = "openai/gpt-oss-20b"
     rules_path: str = "rules/rules.json"
+    timeout: float = 30.0
 
 
 def get_settings() -> Settings:
