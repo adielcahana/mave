@@ -18,7 +18,7 @@ from src.agent import _resolve_settings, analyze_log, create_agent
 from src.config import Settings
 from src.knowledge.docs_db import create_runbook_from_resolution
 from src.rules.engine import RuleTreeEngine, extract_template
-from src.rules.models import LogEvent, ProblemResolution, ProblemResolutionWithRegex
+from src.rules.models import LogEvent, ProblemResolution
 from src.rules.telemetry_filter import TelemetryFilter
 from src.rules.template_registry import LogTemplateRegistry
 
@@ -272,7 +272,7 @@ class LogPipeline:
             )
 
             # If unparsed and returned a regex resolution, register new template immediately
-            if event.is_unparsed and isinstance(resolution, ProblemResolutionWithRegex):
+            if event.is_unparsed and bool(resolution.suggested_log_template_regex):
                 new_tmpl_id = f"DYNAMIC_{event.subsystem or 'UNPARSED'}_{int(time.time() * 1000)}"
                 self.template_registry.register_template(
                     template_id=new_tmpl_id,

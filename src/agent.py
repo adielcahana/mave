@@ -242,6 +242,14 @@ def _build_incident_prompt(
             "Optionally, provide a format string in `format_string` "
             "(e.g., '{timestamp} {node}: {message}') to restore the original log line."
         )
+    else:
+        base_prompt += (
+            "\n5. Formulate a generalized Python regular expression pattern in "
+            "`suggested_log_template_regex` that matches this specific failure message "
+            "across future occurrences, parameterizing variable entities "
+            "(e.g. node names, device identifiers, addresses, numbers, or paths) "
+            "to enable instant fast-path rule matching in the cluster rule engine."
+        )
     return base_prompt
 
 

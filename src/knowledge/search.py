@@ -304,7 +304,11 @@ def search_local_docs(
 def search_external_knowledge(query: str) -> str:
     """Composite knowledge search helper combining local doc search with web fallback."""
     local_res = search_local_docs(query)
-    if "No local documentation or runbook matches found" not in local_res:
+    has_local_matches = not (
+        "No local documentation or runbook matches found" in local_res
+        or "No documentation or knowledge files found" in local_res
+    )
+    if has_local_matches:
         return f"### Local Documentation Matches:\n{local_res}"
 
     web_res = search_web_docs(query)

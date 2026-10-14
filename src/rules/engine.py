@@ -14,6 +14,8 @@ from src.rules.normalizer import parse_log_line
 def extract_template(message: str) -> str:
     """Normalize variable tokens to extract a canonical recurring template."""
     s = message.strip()
+    # Normalize quoted literals or escaped-quote strings (e.g. "param", \042token\042)
+    s = re.sub(r'\\042[^\\]*\\042|"[^"]*"', '"<PARAM>"', s)
     # Normalize hex addresses (e.g., 0xdeadbeef, 0x12)
     s = re.sub(r"\b0x[0-9a-fA-F]+\b", "<HEX>", s)
     # Normalize IP addresses
@@ -39,6 +41,7 @@ def template_to_regex(template: str) -> str:
         "<ID>": r"\d+",
         "<NODE>": r"node-\w+",
         "<NUM>": r"\d+",
+        "<PARAM>": r'[^"\\]+',
     }
     parts = template.split()
     rx_parts: list[str] = []
@@ -49,6 +52,7 @@ def template_to_regex(template: str) -> str:
             sub = re.escape(part)
             for tok, rx in tokens.items():
                 sub = sub.replace(re.escape(tok), rx)
+            sub = sub.replace('"', r'(?:\\042|")')
             rx_parts.append(sub)
     return r"\s+".join(rx_parts)
 
@@ -364,10 +368,25 @@ class RuleTreeEngine:
         sub = event.subsystem.strip().lower()
         ev_type = event.event_type.strip().lower()
         msg = event.message.strip()
-        template = extract_template(msg)
-        pattern = template_to_regex(template)
+        raw = event.raw.strip() if hasattr(event, "raw") and event.raw else ""
 
-        rid = rule_id or f"RULE-AUTO-{abs(hash(template)) % 1_000_000:06d}"
+        pattern = ""
+        suggested = (resolution.suggested_log_template_regex or "").strip()
+        if suggested:
+            try:
+                compiled = re.compile(suggested, re.IGNORECASE)
+                if compiled.search(msg) or (raw and compiled.search(raw)):
+                    pattern = suggested
+            except re.error:
+                pattern = ""
+
+        if not pattern:
+            template = extract_template(msg)
+            pattern = template_to_regex(template)
+        else:
+            template = extract_template(msg)
+
+        rid = rule_id or f"RULE-AUTO-{abs(hash(pattern)) % 1_000_000:06d}"
         rule = Rule(
             rule_id=rid,
             subsystem=sub if sub else "*",
@@ -478,18 +497,23 @@ class RuleTreeEngine:
 
         sub = event.subsystem.strip().lower()
         ev_type = event.event_type.strip().lower()
+        raw = event.raw.strip() if hasattr(event, "raw") and event.raw else ""
 
         # 1. Evaluate pre-configured rules via hierarchical tree
         candidates = self._get_candidate_rules(sub, ev_type)
         for rule in candidates:
-            if rule.validation_status != "REJECTED" and rule.matches(msg):
+            if rule.validation_status != "REJECTED" and (
+                rule.matches(msg) or (bool(raw) and rule.matches(raw))
+            ):
                 return rule
 
         # Fallback search across all rules if subsystem is empty
         if not sub:
             for rules in self._tree.values():
                 for rule in rules:
-                    if rule.validation_status != "REJECTED" and rule.matches(msg):
+                    if rule.validation_status != "REJECTED" and (
+                        rule.matches(msg) or (bool(raw) and rule.matches(raw))
+                    ):
                         return rule
 
         return None

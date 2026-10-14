@@ -465,3 +465,76 @@ async def test_async_benign_validation_rejection_deactivation(tmp_path: Path) ->
         data = json.load(f)
     saved = next(r for r in data if r["rule_id"] == "RULE-BAD-FAN-01")
     assert saved["validation_status"] == "REJECTED"
+
+
+def test_create_rule_from_resolution_uses_agent_suggested_regex():
+    """Verify create_rule_from_resolution uses suggested_log_template_regex from resolution."""
+    engine = RuleTreeEngine()
+    raw_event = "100 node-1 scsi error 1000000000 1 disk I/O error on device sda sector 48912"
+    event = parse_log_line(raw_event)
+
+    res = ProblemResolution(
+        error_summary="Disk I/O error",
+        root_cause="Bad sector on storage block",
+        severity="HIGH",
+        remediation_steps=["Remap sector", "Run fsck"],
+        citations_and_reasons=["Storage runbook"],
+        suggested_log_template_regex=r"disk I/O error on device \w+ sector \d+",
+    )
+
+    rule = engine.create_rule_from_resolution(event, res, rule_id="RULE-DISK-IO-01")
+    assert rule.pattern == r"disk I/O error on device \w+ sector \d+"
+
+    # Match event with a different device name (sdb) and different sector
+    different_raw = "101 node-2 scsi error 1000000001 1 disk I/O error on device sdb sector 99123"
+    different_event = parse_log_line(different_raw)
+    matched = engine.match(different_event)
+    assert matched is not None
+    assert matched.error_summary == "Disk I/O error"
+
+
+def test_create_rule_from_resolution_invalid_regex_fallback():
+    """Verify invalid suggested_log_template_regex safely falls back to template_to_regex."""
+    engine = RuleTreeEngine()
+    raw_event = "100 node-1 kernel panic 1000000000 1 unexpected kernel error code 55"
+    event = parse_log_line(raw_event)
+
+    res = ProblemResolution(
+        error_summary="Kernel panic",
+        root_cause="Kernel exception",
+        severity="CRITICAL",
+        remediation_steps=["Reboot"],
+        citations_and_reasons=["OS guide"],
+        suggested_log_template_regex=r"[unclosed bracket syntax error",
+    )
+
+    rule = engine.create_rule_from_resolution(event, res)
+    assert rule.pattern != r"[unclosed bracket syntax error"
+    assert "<NUM>" in extract_template(event.message)
+
+
+def test_generic_quoted_tokens_in_template_and_regex():
+    """Verify domain-agnostic quoted literals (both double-quoted and octal \\042) match."""
+    engine = RuleTreeEngine()
+    res = ProblemResolution(
+        error_summary="WWID device error",
+        root_cause="SCSI bus drop",
+        severity="HIGH",
+        remediation_steps=["Check fabric"],
+        citations_and_reasons=["Fibre channel guide"],
+    )
+
+    # First event with escaped octal quote \\042
+    raw1 = (
+        r"500 node-1 scsi error 1000000000 1 "
+        r"WWID \04201000010000000000000000000000000\042 bus failure"
+    )
+    event1 = parse_log_line(raw1)
+    engine.create_rule_from_resolution(event1, res)
+
+    # Second event with a different WWID and standard double quotes
+    raw2 = '501 node-2 scsi error 1000000001 1 WWID "02000020000000000000000000000000" bus failure'
+    event2 = parse_log_line(raw2)
+    matched2 = engine.match(event2)
+    assert matched2 is not None
+    assert matched2.error_summary == "WWID device error"

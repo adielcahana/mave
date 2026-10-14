@@ -25,25 +25,26 @@ class ProblemResolution(BaseModel):
         default_factory=list,
         description="Citations and technical rationale",
     )
-
-
-class ProblemResolutionWithRegex(ProblemResolution):
-    """Structured resolution schema with suggested log template regex for unparsed logs."""
-
     suggested_log_template_regex: str = Field(
         default="",
         description=(
-            "Python regular expression with named capture groups (?P<name>...) to parse this "
-            "unparsed log format."
+            "Generalized Python regular expression pattern matching this failure mode "
+            "for fast-path problem resolution and template parsing."
         ),
     )
     format_string: str = Field(
         default="",
         description=(
-            "Optional format string (e.g. '{timestamp} {node} {subsystem}: {message}') "
-            "using named capture group keys to reconstruct the original raw log line."
+            "Optional format string using named capture group keys "
+            "to reconstruct the original raw log line."
         ),
     )
+
+
+class ProblemResolutionWithRegex(ProblemResolution):
+    """Backwards-compatible subclass for resolutions containing template regex."""
+
+    pass
 
 
 class Rule(BaseModel):
