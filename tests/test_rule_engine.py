@@ -538,3 +538,100 @@ def test_generic_quoted_tokens_in_template_and_regex():
     matched2 = engine.match(event2)
     assert matched2 is not None
     assert matched2.error_summary == "WWID device error"
+
+
+def test_regex_tree_parent_envelope_and_child_matching():
+    """Verify ParentEnvelope parses arbitrary envelope and matches child rules without subsystem."""
+    from src.rules.models import ParentEnvelope, Rule
+
+    engine = RuleTreeEngine()
+
+    # Register custom envelope without traditional 'subsystem' or 'event_type' fields
+    custom_env = ParentEnvelope(
+        parent_id="K8S_CONTAINER_ENVELOPE",
+        envelope_regex=r"^\[(?P<timestamp>\d+)\]\s+<(?P<namespace>[\w-]+)>\s+(?P<pod>[\w-]+):\s+(?P<message>.*)$",
+        description="Kubernetes container log",
+    )
+    # Add child rule under this envelope
+    child_rule = Rule(
+        rule_id="RULE-POD-OOM",
+        parent_id="K8S_CONTAINER_ENVELOPE",
+        pattern=r"container (?P<container>\w+) terminated with OOMKilled",
+        rule_type="ACTIONABLE_ERROR",
+        resolution=ProblemResolution(
+            error_summary="Pod OOMKilled",
+            root_cause="Container exceeded memory limit",
+            severity="HIGH",
+            remediation_steps=["Increase memory limit in pod spec"],
+            citations_and_reasons=["K8s Runbook: OOM Recovery"],
+        ),
+    )
+    custom_env.children.append(child_rule)
+    engine.add_envelope(custom_env)
+
+    raw_k8s_line = (
+        "[1710000000] <hpc-jobs> slurm-worker-42: container compute terminated with OOMKilled"
+    )
+    event, matched = engine.match_raw(raw_k8s_line)
+
+    assert event.is_unparsed is False
+    assert event.message == "container compute terminated with OOMKilled"
+    assert event.model_extra is not None
+    assert event.model_extra["namespace"] == "hpc-jobs"
+    assert event.model_extra["pod"] == "slurm-worker-42"
+
+    assert matched is not None
+    assert matched.rule_id == "RULE-POD-OOM"
+    assert matched.resolution is not None
+    assert matched.resolution.error_summary == "Pod OOMKilled"
+
+
+def test_regex_tree_benign_child_matching():
+    """Verify child rule with rule_type='BENIGN_TELEMETRY' is correctly matched."""
+    from src.rules.models import Rule
+
+    engine = RuleTreeEngine.with_defaults()
+
+    benign_rule = Rule(
+        rule_id="RULE-BENIGN-HEARTBEAT",
+        parent_id="*",
+        pattern=r"routine heartbeat ping seq=\d+",
+        rule_type="BENIGN_TELEMETRY",
+    )
+    engine.add_rule(benign_rule)
+
+    raw = "100 node-1 daemon status 1000000000 1 routine heartbeat ping seq=409"
+    event, matched = engine.match_raw(raw)
+    assert matched is not None
+    assert matched.rule_type == "BENIGN_TELEMETRY"
+    assert matched.resolution is None
+
+
+def test_regex_tree_dynamic_parent_learning_on_unparsed():
+    """Verify create_rule_from_resolution creates new ParentEnvelope when log is unparsed."""
+    from src.rules.models import LogEvent
+
+    engine = RuleTreeEngine()
+    unparsed_raw = "PROPRIETARY_DEVICE [404] error_code=99 status=offline"
+    event = LogEvent(raw=unparsed_raw, message=unparsed_raw, is_unparsed=True)
+
+    resolution = ProblemResolution(
+        error_summary="Proprietary device failure",
+        root_cause="Device hardware offline",
+        severity="HIGH",
+        remediation_steps=["Reset device"],
+        citations_and_reasons=["Proprietary manual"],
+        suggested_log_template_regex=(
+            r"^PROPRIETARY_DEVICE\s+\[(?P<device_id>\d+)\]\s+(?P<message>error_code=\d+\s+status=\w+)$"
+        ),
+    )
+
+    rule = engine.create_rule_from_resolution(event, resolution)
+    assert rule.parent_id.startswith("ENV-")
+
+    # Second log line with different device ID matches via the newly created parent envelope!
+    second_raw = "PROPRIETARY_DEVICE [505] error_code=99 status=offline"
+    second_event, second_matched = engine.match_raw(second_raw)
+    assert second_event.is_unparsed is False
+    assert second_event.model_extra is not None
+    assert second_event.model_extra["device_id"] == "505"

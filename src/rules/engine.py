@@ -7,7 +7,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from src.rules.models import LogEvent, ProblemResolution, Rule
+from src.rules.models import LogEvent, ParentEnvelope, ProblemResolution, Rule
 from src.rules.normalizer import parse_log_line
 
 
@@ -90,6 +90,40 @@ DEFAULT_RULES_PATHS: list[Path] = [
     Path(__file__).resolve().parent.parent.parent / "rules" / "rules.json",
 ]
 
+DEFAULT_ENVELOPE_PATHS: list[Path] = [
+    Path("resources/log_templates.json"),
+    Path(__file__).resolve().parent.parent.parent / "resources" / "log_templates.json",
+]
+
+
+def get_default_envelopes(
+    path: Path | str | None = "resources/log_templates.json",
+) -> list[ParentEnvelope]:
+    """Return standard parent envelope templates from log_templates.json."""
+    candidate_paths: list[Path] = []
+    if path:
+        candidate_paths.append(Path(path))
+    for default_p in DEFAULT_ENVELOPE_PATHS:
+        if default_p not in candidate_paths:
+            candidate_paths.append(default_p)
+
+    for p in candidate_paths:
+        if p.is_file():
+            try:
+                with open(p, encoding="utf-8") as f:
+                    data = json.load(f)
+                return [
+                    ParentEnvelope(
+                        parent_id=item["template_id"],
+                        envelope_regex=item["regex"],
+                        description=item.get("description", ""),
+                    )
+                    for item in data
+                ]
+            except Exception:
+                pass
+    return []
+
 
 def get_default_rules(path: Path | str | None = "rules/rules.json") -> list[Rule]:
     """Return standard LANL HPC failure resolution rules from rules file."""
@@ -112,7 +146,7 @@ def get_default_rules(path: Path | str | None = "rules/rules.json") -> list[Rule
 
 
 class RuleTreeEngine:
-    """Fast-path hierarchical rule tree engine, dynamic cache, and persistent rule registry."""
+    """Fast-path Regex Tree engine (Parent Envelope -> Child Message Rules) and dynamic cache."""
 
     def __init__(
         self,
@@ -120,14 +154,20 @@ class RuleTreeEngine:
         load_defaults: bool = False,
         max_cache_size: int = 10_000,
         benign_cases: list[str] | None = None,
+        envelopes_path: Path | str | None = "resources/log_templates.json",
     ) -> None:
         self.rules_path: Path | None = Path(rules_path) if rules_path else None
+        self.envelopes_path: Path | None = Path(envelopes_path) if envelopes_path else None
         self._max_cache_size: int = max_cache_size
         self._benign_cases: list[str] | None = benign_cases
 
+        # Parent envelopes (Regex Tree root nodes)
+        self._envelopes: list[ParentEnvelope] = []
         # Primary registry of all known rules: rule_id -> Rule
         self._rules: dict[str, Rule] = {}
-        # Active tree index for fast-path: (subsystem, event_type) -> list[Rule]
+        # Common / universal rules that match across any envelope
+        self._common_rules: list[Rule] = []
+        # Active tree index for (subsystem, event_type) fallback compatibility
         self._tree: dict[tuple[str, str], list[Rule]] = {}
         # Dynamic exact cache: (subsystem, message) -> ProblemResolution
         self._exact_cache: OrderedDict[tuple[str, str], ProblemResolution] = OrderedDict()
@@ -140,6 +180,9 @@ class RuleTreeEngine:
         # In-flight async validation tasks: rule_id -> asyncio.Task[bool]
         self._validation_tasks: dict[str, asyncio.Task[bool]] = {}
 
+        # Load standard parent envelopes
+        self.load_default_envelopes(self.envelopes_path)
+
         if self.rules_path and self.rules_path.is_file():
             self.load_rules_from_file(self.rules_path)
         elif load_defaults:
@@ -151,12 +194,14 @@ class RuleTreeEngine:
         rules_path: Path | str | None = "rules/rules.json",
         max_cache_size: int = 10_000,
         benign_cases: list[str] | None = None,
+        envelopes_path: Path | str | None = "resources/log_templates.json",
     ) -> "RuleTreeEngine":
         """Instantiate RuleTreeEngine pre-loaded with persistent or default rules."""
         engine = cls(
             rules_path=rules_path,
             max_cache_size=max_cache_size,
             benign_cases=benign_cases,
+            envelopes_path=envelopes_path,
         )
         if not engine._rules:
             engine.load_default_rules()
@@ -178,6 +223,30 @@ class RuleTreeEngine:
     def rules(self) -> list[Rule]:
         """Return list of all rules in the persistent registry."""
         return list(self._rules.values())
+
+    @property
+    def envelopes(self) -> list[ParentEnvelope]:
+        """Return list of all registered parent envelopes."""
+        return list(self._envelopes)
+
+    def load_default_envelopes(self, path: Path | str | None = None) -> list[ParentEnvelope]:
+        """Load standard cluster parent envelopes into the Regex Tree."""
+        target = path or self.envelopes_path
+        envelopes = get_default_envelopes(target)
+        for env in envelopes:
+            self.add_envelope(env)
+        return envelopes
+
+    def add_envelope(self, envelope: ParentEnvelope) -> None:
+        """Register a parent envelope into the Regex Tree."""
+        existing_idx = next(
+            (i for i, e in enumerate(self._envelopes) if e.parent_id == envelope.parent_id),
+            None,
+        )
+        if existing_idx is not None:
+            self._envelopes[existing_idx] = envelope
+        else:
+            self._envelopes.append(envelope)
 
     @property
     def cache_size(self) -> int:
@@ -223,6 +292,9 @@ class RuleTreeEngine:
 
     def clear_rules(self) -> None:
         """Clear all indexed and registered rules."""
+        for env in self._envelopes:
+            env.children.clear()
+        self._common_rules.clear()
         self._tree.clear()
         self._rules.clear()
 
@@ -258,11 +330,29 @@ class RuleTreeEngine:
         return None
 
     def add_rule(self, rule: Rule, persist: bool = True) -> None:
-        """Register a rule into the registry and tree index (unless REJECTED)."""
+        """Register a rule into the registry and attach to its parent envelope or common pool."""
         self._rules[rule.rule_id] = rule
 
         # Only index in matching tree if not REJECTED
         if rule.validation_status != "REJECTED":
+            # 1. Attach to parent envelope if specified
+            if rule.parent_id and rule.parent_id != "*":
+                env = next((e for e in self._envelopes if e.parent_id == rule.parent_id), None)
+                if env is not None:
+                    existing_idx = next(
+                        (i for i, r in enumerate(env.children) if r.rule_id == rule.rule_id),
+                        None,
+                    )
+                    if existing_idx is not None:
+                        env.children[existing_idx] = rule
+                    else:
+                        env.children.append(rule)
+                else:
+                    self._add_to_common(rule)
+            else:
+                self._add_to_common(rule)
+
+            # 2. Also index in (subsystem, event_type) for backwards-compatible candidate lookups
             sub = rule.subsystem.strip().lower()
             ev_type = rule.event_type.strip().lower()
             key = (sub, ev_type)
@@ -280,6 +370,17 @@ class RuleTreeEngine:
         if persist and self.rules_path:
             self.save_rules_to_file()
 
+    def _add_to_common(self, rule: Rule) -> None:
+        """Add rule to common rules pool matching across envelopes."""
+        existing_idx = next(
+            (i for i, r in enumerate(self._common_rules) if r.rule_id == rule.rule_id),
+            None,
+        )
+        if existing_idx is not None:
+            self._common_rules[existing_idx] = rule
+        else:
+            self._common_rules.append(rule)
+
     def add_rules(self, rules: list[Rule], persist: bool = True) -> None:
         """Register multiple rules into registry and tree index."""
         for rule in rules:
@@ -289,6 +390,9 @@ class RuleTreeEngine:
 
     def remove_rule_from_tree(self, rule_id: str) -> None:
         """Remove a rule from active matching tree (e.g., when validation rejects it)."""
+        for env in self._envelopes:
+            env.children = [r for r in env.children if r.rule_id != rule_id]
+        self._common_rules = [r for r in self._common_rules if r.rule_id != rule_id]
         for key in list(self._tree.keys()):
             self._tree[key] = [r for r in self._tree[key] if r.rule_id != rule_id]
 
@@ -354,12 +458,80 @@ class RuleTreeEngine:
 
         return is_valid
 
+    def match_raw(self, raw_line: str) -> tuple[LogEvent, Rule | None]:
+        """Process a raw log line through the Regex Tree (Parent Envelope -> Child Rule)."""
+        line = raw_line.strip()
+
+        for env in self._envelopes:
+            m = env.match(line)
+            if m:
+                data = m.groupdict()
+                msg = data.get("message", "").strip()
+
+                ts = 0
+                if "timestamp" in data:
+                    try:
+                        ts = int(data["timestamp"])
+                    except (ValueError, TypeError):
+                        ts = 0
+                flag = 0
+                if "flag" in data:
+                    try:
+                        flag = int(data["flag"])
+                    except (ValueError, TypeError):
+                        flag = 0
+
+                event = LogEvent(
+                    log_id=str(data.get("log_id", "")),
+                    node=str(data.get("node", "")),
+                    subsystem=str(data.get("subsystem", "")),
+                    event_type=str(data.get("event_type", "")),
+                    timestamp=ts,
+                    flag=flag,
+                    message=msg,
+                    raw=raw_line,
+                    is_unparsed=False,
+                    **{
+                        k: v
+                        for k, v in data.items()
+                        if k
+                        not in {
+                            "log_id",
+                            "node",
+                            "subsystem",
+                            "event_type",
+                            "timestamp",
+                            "flag",
+                            "message",
+                        }
+                    },
+                )
+
+                # 1. Match child rules under this parent envelope
+                matched_child = env.match_child(msg)
+                if matched_child is not None:
+                    return event, matched_child
+
+                # 2. Match common rules across any envelope
+                for rule in self._common_rules:
+                    if rule.validation_status != "REJECTED" and rule.matches(msg):
+                        return event, rule
+
+                # Envelope matched, but message is novel
+                return event, None
+
+        # No parent envelope matched: completely novel envelope
+        fallback_event = parse_log_line(raw_line)
+        fallback_event.is_unparsed = True
+        return fallback_event, None
+
     def create_rule_from_resolution(
         self,
         event: LogEvent | str,
         resolution: ProblemResolution,
         rule_id: str | None = None,
         auto_validate_async: bool = True,
+        parent_id: str | None = None,
     ) -> Rule:
         """Create a new rule from a diagnosed event with PENDING validation state and persist."""
         if isinstance(event, str):
@@ -375,7 +547,7 @@ class RuleTreeEngine:
         if suggested:
             try:
                 compiled = re.compile(suggested, re.IGNORECASE)
-                if compiled.search(msg) or (raw and compiled.search(raw)):
+                if (msg and compiled.search(msg)) or (raw and compiled.search(raw)):
                     pattern = suggested
             except re.error:
                 pattern = ""
@@ -386,12 +558,26 @@ class RuleTreeEngine:
         else:
             template = extract_template(msg)
 
+        target_parent = parent_id or "*"
+        # If event was unparsed and agent provided a full-line regex with named groups:
+        if event.is_unparsed and suggested and "(?P<message>" in suggested:
+            new_env_id = f"ENV-{abs(hash(suggested)) % 1_000_000:06d}"
+            env = ParentEnvelope(
+                parent_id=new_env_id,
+                envelope_regex=suggested,
+                description=f"Auto-generated envelope for {sub or 'unparsed'}",
+            )
+            self.add_envelope(env)
+            target_parent = new_env_id
+
         rid = rule_id or f"RULE-AUTO-{abs(hash(pattern)) % 1_000_000:06d}"
         rule = Rule(
             rule_id=rid,
+            parent_id=target_parent,
             subsystem=sub if sub else "*",
             event_type=ev_type if ev_type else "*",
             pattern=pattern,
+            rule_type="ACTIONABLE_ERROR",
             resolution=resolution,
             human_validated=False,
             validation_status="PENDING",
@@ -410,7 +596,6 @@ class RuleTreeEngine:
                 task = loop.create_task(self.validate_rule_async(rule))
                 self._validation_tasks[rule.rule_id] = task
             except RuntimeError:
-                # No running event loop in current context
                 pass
 
         return rule
@@ -489,17 +674,37 @@ class RuleTreeEngine:
         Returns matching Rule (which may be VALIDATED or PENDING), or None.
         """
         if isinstance(event, str):
-            event = parse_log_line(event)
+            evt, rule = self.match_raw(event)
+            if rule is not None:
+                return rule
+            event = evt
 
         msg = event.message.strip()
-        if not msg:
+        raw = event.raw.strip() if hasattr(event, "raw") and event.raw else ""
+        if not msg and not raw:
             return None
+
+        # 1. Check parent envelopes' children
+        for env in self._envelopes:
+            if msg:
+                matched = env.match_child(msg)
+                if matched is not None:
+                    return matched
+            if raw:
+                matched = env.match_child(raw)
+                if matched is not None:
+                    return matched
+
+        # 2. Check common rules
+        for rule in self._common_rules:
+            if rule.validation_status != "REJECTED":
+                if (msg and rule.matches(msg)) or (raw and rule.matches(raw)):
+                    return rule
 
         sub = event.subsystem.strip().lower()
         ev_type = event.event_type.strip().lower()
-        raw = event.raw.strip() if hasattr(event, "raw") and event.raw else ""
 
-        # 1. Evaluate pre-configured rules via hierarchical tree
+        # 3. Evaluate pre-configured rules via candidate tree
         candidates = self._get_candidate_rules(sub, ev_type)
         for rule in candidates:
             if rule.validation_status != "REJECTED" and (

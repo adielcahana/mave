@@ -18,5 +18,10 @@
     "template_id": "LANL_7_TOKEN_STANDARD",
     "regex": "^(?P<log_id>\\S+)\\s+(?P<node>node-\\S+|\\S+)\\s+(?P<subsystem>\\S+)\\s+(?P<event_type>\\S+)\\s+(?P<timestamp>\\d+)\\s+(?P<flag>\\d+)\\s+(?P<message>.*)$",
     "description": "LANL 7-token standard format"
+  },
+  {
+    "template_id": "LANL_8_TOKEN_EXTENDED",
+    "regex": "^(?P<log_id>\\S+)\\s+(?P<subsystem>resourcemgmtdaeomon|\\S+)\\s+(?P<node>node-\\S+|\\S+)\\s+(?P<component>\\S+)\\s+(?P<event_type>\\S+)\\s+(?P<timestamp>\\d+)\\s+(?P<flag>\\d+)\\s+(?P<message>.*)$",
+    "description": "LANL 8-token extended daemon format"
   }
 ]

@@ -47,18 +47,27 @@ class ProblemResolutionWithRegex(ProblemResolution):
     pass
 
 
+RuleType = Literal["ACTIONABLE_ERROR", "BENIGN_TELEMETRY"]
+
+
 class Rule(BaseModel):
-    """Pre-configured rule for fast-path problem resolution."""
+    """Pre-configured rule for fast-path problem resolution or routine telemetry filtration."""
 
     rule_id: str = Field(default="", description="Unique identifier for the rule")
+    parent_id: str = Field(default="*", description="Parent envelope template ID or '*' for all")
     subsystem: str = Field(default="*", description="Subsystem filter or '*' for all")
     event_type: str = Field(default="*", description="Event type filter or '*' for all")
     pattern: str = Field(
         default="",
         description="Regular expression pattern to match against event.message",
     )
-    resolution: ProblemResolution = Field(
-        description="ProblemResolution payload returned upon match"
+    rule_type: RuleType = Field(
+        default="ACTIONABLE_ERROR",
+        description="Rule classification: 'ACTIONABLE_ERROR' or 'BENIGN_TELEMETRY'",
+    )
+    resolution: ProblemResolution | None = Field(
+        default=None,
+        description="ProblemResolution payload returned upon match",
     )
     human_validated: bool = Field(
         default=False,
@@ -86,6 +95,45 @@ class Rule(BaseModel):
             return bool(self.get_compiled_pattern().search(message))
         except Exception:
             return False
+
+
+class ParentEnvelope(BaseModel):
+    """Parent log envelope regex defining outer log structure and extracting fields."""
+
+    parent_id: str = Field(description="Unique identifier for the envelope template")
+    envelope_regex: str = Field(
+        description="Python regex with named capture groups (?P<name>...) ending in (?P<message>.*)"
+    )
+    description: str = Field(
+        default="",
+        description="Human-readable description of this log format",
+    )
+    children: list[Rule] = Field(
+        default_factory=list,
+        description="Child message rules scoped under this envelope",
+    )
+
+    _compiled: re.Pattern[str] | None = PrivateAttr(default=None)
+
+    def get_compiled_pattern(self) -> re.Pattern[str]:
+        """Return or lazily compile the cached envelope regex."""
+        if self._compiled is None:
+            self._compiled = re.compile(self.envelope_regex)
+        return self._compiled
+
+    def match(self, raw_line: str) -> re.Match[str] | None:
+        """Match a raw log line against this envelope regex."""
+        try:
+            return self.get_compiled_pattern().search(raw_line)
+        except Exception:
+            return None
+
+    def match_child(self, message: str) -> Rule | None:
+        """Evaluate children rules against message, returning first non-rejected match."""
+        for child in self.children:
+            if child.validation_status != "REJECTED" and child.matches(message):
+                return child
+        return None
 
 
 class LogEvent(BaseModel):

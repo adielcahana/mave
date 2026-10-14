@@ -163,6 +163,7 @@ def create_agent(
         deps_type=Settings,
         output_type=ProblemResolution,
         system_prompt=SRE_SYSTEM_PROMPT,
+        retries=3,
     )
     agent.tool_plain(query_subsystem_docs)
     agent.tool_plain(list_known_subsystems)
@@ -244,11 +245,13 @@ def _build_incident_prompt(
         )
     else:
         base_prompt += (
-            "\n5. Formulate a generalized Python regular expression pattern in "
-            "`suggested_log_template_regex` that matches this specific failure message "
-            "across future occurrences, parameterizing variable entities "
-            "(e.g. node names, device identifiers, addresses, numbers, or paths) "
-            "to enable instant fast-path rule matching in the cluster rule engine."
+            f"\n5. The log envelope was successfully parsed, but the message body is novel.\n"
+            f"Formulate a generalized Python regular expression pattern in "
+            f"`suggested_log_template_regex` that matches this specific failure message "
+            f"body ('{log_event.message}') across future occurrences, "
+            f"parameterizing variable entities "
+            f"(e.g. node names, device identifiers, addresses, numbers, or paths) "
+            f"to enable instant fast-path rule matching in the cluster rule engine."
         )
     return base_prompt
 

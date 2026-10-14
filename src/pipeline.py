@@ -209,10 +209,22 @@ class LogPipeline:
         """
         start = time.perf_counter()
 
-        # Step 1: Parse line via template registry
-        event = self.template_registry.parse(raw_line)
+        # Step 1: Match raw line against Regex Tree (Parent Envelope -> Child Rule)
+        event, matched_rule = self.rule_engine.match_raw(raw_line)
 
         # Step 2: Wire-speed routine telemetry filtration
+        if matched_rule is not None and matched_rule.rule_type == "BENIGN_TELEMETRY":
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            return self._notify_result(
+                PipelineResult(
+                    log_id=event.log_id,
+                    status="TELEMETRY_FILTERED",
+                    resolution=None,
+                    cost_usd=0.0,
+                    latency_ms=latency_ms,
+                )
+            )
+
         if TelemetryFilter.is_routine_telemetry(event):
             latency_ms = (time.perf_counter() - start) * 1000.0
             return self._notify_result(
@@ -225,7 +237,20 @@ class LogPipeline:
                 )
             )
 
-        # Step 3: Fast-path rule matching (pre-configured rules + dynamic cache)
+        # Step 3: Fast-path rule matching from Regex Tree
+        if matched_rule is not None and matched_rule.resolution is not None:
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            return self._notify_result(
+                PipelineResult(
+                    log_id=event.log_id,
+                    status="FAST_PATH_HIT",
+                    resolution=matched_rule.resolution,
+                    cost_usd=0.0,
+                    latency_ms=latency_ms,
+                )
+            )
+
+        # Fallback check on match(event)
         matched_resolution = self.rule_engine.match(event)
         if matched_resolution is not None:
             latency_ms = (time.perf_counter() - start) * 1000.0

@@ -4,9 +4,9 @@
 
 High Performance Computing (HPC) clusters generate large-scale, semi-structured log streams across thousands of compute and service nodes. The objective of this project is to build an intelligent, low-latency, and cost-effective system for HPC log analysis and automated problem resolution that:
 - **Wire-speed telemetry filtering**: Discards routine benign heartbeats and state notifications with zero token cost (<0.10 ms).
-- **Fast-path deterministic resolution**: Resolves vetted failure modes in sub-milliseconds (<0.50 ms) using an in-memory `RuleTreeEngine` and single-pass `TemplateRegistry`.
+- **Fast-path deterministic resolution**: Resolves vetted failure modes and discards benign heartbeats in sub-milliseconds (<0.10 ms) using a format-agnostic, two-tier `RuleTreeEngine` (Parent Envelope Regex -> Child Message Regex).
 - **Grounded LLM-powered incident diagnosis**: Escalates novel, unclassified failures to a Pydantic-AI SRE agent backed by NVIDIA NIM and authoritative LANL subsystem runbooks, generating cited, reproducible root-cause remediations.
-- **Dynamic rule learning & caching**: Synthesizes regex templates and dynamic fast-path cache entries from agent investigations to prevent repeat LLM invocations.
+- **Dynamic rule learning & caching**: Synthesizes regex envelope/message templates and registers dynamic fast-path tree entries from agent investigations to prevent repeat LLM invocations.
 
 ---
 
@@ -31,19 +31,23 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
 [Incoming HPC Log Stream]
         │
         ▼
-[Tier 1A: Telemetry Filter] ────────► Discard routine heartbeats (<0.1ms, $0)
-        │ (Actionable error)
-        ▼
-[Tier 1B: RuleTreeEngine] ──────────► Immediate fast-path resolution (<0.5ms, $0)
-        │ (Novel unseen error)
-        ▼
-[Circuit Breaker / Debouncer] ──────► Guardrail shielding against API outages & storms
-        │ (Incident investigation)
-        ▼
-[Tier 2: SRE Resolution Agent] ─────► Pydantic-AI + NVIDIA NIM + Domain Runbooks
-        │                             Diagnoses root cause, severity & citations
-        ▼
-[Dynamic Fast-Path Cache] ──────────► Caches resolution into RuleTreeEngine (<0.05ms, $0)
+[Tier 1: Format-Agnostic Regex Tree]
+   ├── Parent Envelope Regex (Syslog, K8s, LANL, Custom Daemons)
+   │     │
+   │     ├──► Benign Child Rule ───────► Discard telemetry (<0.05ms, $0)
+   │     │
+   │     └──► Actionable Child Rule ───► Fast-path resolution (<0.05ms, $0)
+   │
+   └── Novel / Unmatched Message
+         │
+         ▼
+[Circuit Breaker / Debouncer] ─────────► Guardrail shielding against API outages & storms
+         │ (Incident escalation)
+         ▼
+[Tier 2: SRE Resolution Agent] ────────► Pydantic-AI + NVIDIA NIM + Domain Runbooks
+         │                               Synthesizes Parent / Child Regex & Remediation
+         ▼
+[Dynamic Fast-Path Cache & Tree] ──────► Registers rule into Regex Tree (<0.05ms, $0)
 ```
 
 ### Core Modules (`src/`)
@@ -51,13 +55,13 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
 - `src/agent.py`: Production Pydantic-AI SRE agent with runbook tools, prompt grounding, and circuit breaker.
 - `src/config.py`: Application settings (`Settings`) with `.env` loading.
 - `src/main.py`: Unified streaming pipeline CLI & benchmark evaluation entry point.
-- `src/pipeline.py`: Two-tier streaming orchestrator (`HPCStreamPipeline`) connecting ingestion, filtering, rules, and agent escalation.
+- `src/pipeline.py`: Two-tier streaming orchestrator (`HPCStreamPipeline`) connecting ingestion, regex tree filtering/rules, and agent escalation.
 - `src/evaluation.py`: Quantitative benchmark evaluation suite measuring classification accuracy, LLM bypass rate, and latency SLAs.
 - `src/split_data.py`: Deterministic dataset partitioning utility.
 - `src/knowledge/docs_db.py`: In-memory knowledge base indexing LANL cluster runbooks with dynamic learning and persistence.
 - `src/knowledge/search.py`: External technical documentation retrieval (DuckDuckGo web search and local Markdown/text docs scanner).
-- `src/rules/engine.py`: High-throughput regex rule matching engine (`RuleTreeEngine`) with dynamic LRU caching.
-- `src/rules/models.py`: Strongly-typed domain models (`LogEvent`, `Rule`, `ProblemResolution`, `RemediationStep`, `SeverityLevel`).
+- `src/rules/engine.py`: High-throughput two-tier regex tree matching engine (`RuleTreeEngine`, `ParentEnvelope`) with dynamic LRU caching.
+- `src/rules/models.py`: Strongly-typed domain models (`LogEvent`, `ParentEnvelope`, `Rule`, `ProblemResolution`, `RemediationStep`, `SeverityLevel`).
 - `src/rules/normalizer.py`: High-performance semi-structured log line parser.
 - `src/rules/telemetry_filter.py`: Sub-millisecond pre-filter eliminating benign heartbeats.
 - `src/rules/template_registry.py`: Dynamic single-pass regex template extractor and unparsed triage monitor.
@@ -125,7 +129,7 @@ mave/
 Always verify the codebase after any modification using Astral's tooling suite:
 
 ```bash
-# 1. Run all unit and integration tests (103 tests passing)
+# 1. Run all unit and integration tests (106 tests passing)
 uv run pytest
 
 # 2. Check static typing (Astral Ty)
