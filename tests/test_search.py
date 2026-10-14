@@ -177,3 +177,46 @@ def test_search_external_knowledge_composite(tmp_path: Path) -> None:
 
     assert "Web Search Results" in output
     assert "Mellanox InfiniBand" in output
+
+
+def test_read_local_file_with_line_numbers(tmp_path: Path) -> None:
+    """Verify read_local_file outputs line-numbered slices correctly."""
+    from src.knowledge.search import read_local_file
+
+    test_file = tmp_path / "guide.md"
+    content = "\n".join(f"Line {i} content text" for i in range(1, 11))
+    test_file.write_text(content, encoding="utf-8")
+
+    out = read_local_file(str(test_file), start_line=3, end_line=6)
+    assert "Lines 3-6 of 10" in out
+    assert "   3 | Line 3 content text" in out
+    assert "   4 | Line 4 content text" in out
+    assert "   5 | Line 5 content text" in out
+    assert "   6 | Line 6 content text" in out
+    assert "Line 2 content text" not in out
+    assert "Line 7 content text" not in out
+
+
+def test_read_local_file_not_found_and_errors() -> None:
+    """Verify read_local_file handles missing files and empty path."""
+    from src.knowledge.search import read_local_file
+
+    out_missing = read_local_file("completely_missing_file_xyz.md")
+    assert "File not found" in out_missing
+
+    out_empty = read_local_file("")
+    assert "Please provide a valid file_path" in out_empty
+
+
+def test_read_local_file_out_of_bounds_and_empty(tmp_path: Path) -> None:
+    """Verify read_local_file handles out-of-bounds start lines and empty files."""
+    from src.knowledge.search import read_local_file
+
+    empty_f = tmp_path / "empty.txt"
+    empty_f.write_text("", encoding="utf-8")
+    assert "Empty file" in read_local_file(str(empty_f))
+
+    small_f = tmp_path / "small.txt"
+    small_f.write_text("One line", encoding="utf-8")
+    out_oob = read_local_file(str(small_f), start_line=50)
+    assert "exceeds total lines" in out_oob

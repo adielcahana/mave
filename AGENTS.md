@@ -125,7 +125,7 @@ mave/
 Always verify the codebase after any modification using Astral's tooling suite:
 
 ```bash
-# 1. Run all unit and integration tests (97 tests passing)
+# 1. Run all unit and integration tests (100 tests passing)
 uv run pytest
 
 # 2. Check static typing (Astral Ty)

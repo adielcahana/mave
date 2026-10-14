@@ -13,6 +13,7 @@ from src.knowledge.docs_db import (
     query_subsystem_docs,
 )
 from src.knowledge.search import (
+    read_local_file,
     search_external_knowledge,
     search_local_docs,
     search_web_docs,
@@ -27,6 +28,7 @@ __all__ = [
     "create_agent",
     "list_known_subsystems",
     "query_subsystem_docs",
+    "read_local_file",
     "reset_circuit_breaker",
     "search_external_knowledge",
     "search_local_docs",
@@ -44,6 +46,8 @@ Operational Guidelines:
    - Query cluster runbooks using `query_subsystem_docs`.
    - Use `search_local_docs` with grep-style regex queries for text/markdown docs or jq-style
      filters (e.g. `.subsystem == "unix.hw"`, `keywords=panic`) for JSON runbooks/rules.
+   - Use `read_local_file` with line numbers as follow-up to inspect surrounding context,
+     full remediation instructions, or specific sections around matched lines.
    - If the subsystem name is ambiguous or unknown, query `list_known_subsystems` first.
 
 2. Web Search Fallback:
@@ -163,6 +167,7 @@ def create_agent(
     agent.tool_plain(query_subsystem_docs)
     agent.tool_plain(list_known_subsystems)
     agent.tool_plain(search_local_docs)
+    agent.tool_plain(read_local_file)
     agent.tool_plain(search_web_docs)
 
     # Attach backwards-compatible tool mapping attribute
@@ -197,6 +202,7 @@ def _build_incident_prompt(
         f"1. First search local knowledge using `query_subsystem_docs` "
         f"(subsystem='{log_event.subsystem}', keyword='{log_event.event_type}')\n"
         f"   or `search_local_docs` (grep regex on text docs, jq filters on JSON files).\n"
+        f"   Use `read_local_file` with line numbers to follow up on matched files and sections.\n"
         f"2. Only if local search yields no relevant match, query `search_web_docs` for "
         f"external technical guides.\n"
         f"3. Diagnose the root cause and determine severity (CRITICAL, HIGH, MEDIUM, LOW, INFO).\n"

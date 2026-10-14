@@ -40,6 +40,9 @@ def test_agent_tool_registry() -> None:
     assert "search_local_docs" in tool_keys, (
         f"Expected 'search_local_docs' in agent tools, found: {tool_keys}"
     )
+    assert "read_local_file" in tool_keys, (
+        f"Expected 'read_local_file' in agent tools, found: {tool_keys}"
+    )
     assert "search_web_docs" in tool_keys, (
         f"Expected 'search_web_docs' in agent tools, found: {tool_keys}"
     )
@@ -50,6 +53,7 @@ def test_agent_tool_registry() -> None:
         assert "query_subsystem_docs" in fn_tools
         assert "list_known_subsystems" in fn_tools
         assert "search_local_docs" in fn_tools
+        assert "read_local_file" in fn_tools
         assert "search_web_docs" in fn_tools
 
 
