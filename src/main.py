@@ -1,5 +1,6 @@
 """HPC Log Stream Automated Problem Resolution Engine & CLI."""
 
+# ruff: noqa: E402
 import argparse
 import asyncio
 import io
@@ -11,6 +12,11 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
+
+# Ensure repository root is on sys.path for direct script execution (`python src/main.py`)
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
 # Suppress Pydantic-AI ASCII banner for clean TUI rendering
 os.environ["PYDANTIC_AI_NO_BANNER"] = "1"

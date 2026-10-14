@@ -82,16 +82,16 @@ Ingest any HPC log file (`.log`, `.txt`, or `.json`) to generate quantitative cl
 
 ```bash
 # Ingest default benchmark file (data/golden_eval.json)
-uv run python main.py
+uv run python src/main.py
 
 # Ingest raw cluster logs with an optional line limit
-uv run python main.py data/HPC.log --limit 500
+uv run python src/main.py data/HPC.log --limit 500
 
 # Ingest any custom log stream
-uv run python main.py path/to/cluster.log
+uv run python src/main.py path/to/cluster.log
 
 # Process a single log line directly from CLI
-uv run python main.py --line "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
+uv run python src/main.py --line "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
 ```
 
 ### Output Provided
@@ -148,7 +148,6 @@ mave/
 ├── report.md             # Comprehensive architectural submission report
 ├── README.md             # Setup, architecture overview, and run commands
 ├── pyproject.toml        # Dependencies, tool configurations (Ruff, Ty, Pytest)
-├── main.py               # Stream log analysis & automated problem resolution CLI
 ├── rules/
 │   └── rules.json        # Persistent, vetted rule registry
 ├── data/
@@ -161,6 +160,7 @@ mave/
 │   ├── agent.py          # Production Pydantic-AI SRE Agent & circuit breaker
 │   ├── config.py         # Strongly-typed Pydantic-Settings configuration
 │   ├── evaluation.py     # Benchmark evaluation metrics and SLA engine
+│   ├── main.py           # Stream log analysis & automated problem resolution CLI
 │   ├── pipeline.py       # Two-tier streaming pipeline orchestrator
 │   ├── knowledge/
 │   │   ├── __init__.py

@@ -9,7 +9,9 @@ from unittest.mock import patch
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from main import (
+from src.agent import ProblemResolution, create_agent
+from src.config import Settings
+from src.main import (
     LogProcessingStats,
     analyze_log_lines,
     main,
@@ -17,8 +19,6 @@ from main import (
     run_evaluate,
     track_execution_timing,
 )
-from src.agent import ProblemResolution, create_agent
-from src.config import Settings
 from src.pipeline import LogPipeline, PipelineResult
 
 
@@ -158,7 +158,7 @@ def test_cli_main_dispatch() -> None:
     """Verify main entry point dispatches commands."""
     with (
         patch("sys.argv", ["main.py", "evaluate"]),
-        patch("main.run_evaluate") as mock_eval,
+        patch("src.main.run_evaluate") as mock_eval,
     ):
         main()
         mock_eval.assert_called_once()

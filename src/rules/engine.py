@@ -24,8 +24,6 @@ def extract_template(message: str) -> str:
     s = re.sub(r"\bnode-\w+\b", "<NODE>", s)
     # Normalize storage/domain names with numbers (e.g., storage1034 -> storage<NUM>)
     s = re.sub(r"\b(storage|domain|vol)\d+\b", r"\1<NUM>", s, flags=re.IGNORECASE)
-    # Normalize SCSI WWID addresses (e.g., SCSI-WWID:01000010:6005-08b4-...)
-    s = re.sub(r"\bSCSI-WWID:[0-9a-fA-F:-]+\b", "<WWID>", s)
     # Normalize generic numbers (integers or error codes)
     s = re.sub(r"\b\d+\b", "<NUM>", s)
     # Collapse multiple whitespaces
@@ -41,7 +39,6 @@ def template_to_regex(template: str) -> str:
         "<ID>": r"\d+",
         "<NODE>": r"node-\w+",
         "<NUM>": r"\d+",
-        "<WWID>": r"[0-9a-fA-F:-]+",
     }
     parts = template.split()
     rx_parts: list[str] = []

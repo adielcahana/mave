@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 __all__ = [
+    "read_local_file",
     "search_external_knowledge",
     "search_local_docs",
     "search_web",
@@ -316,3 +317,75 @@ def search_external_knowledge(query: str) -> str:
 
     web_res = search_web_docs(clean_q)
     return f"{local_res}\n\n---\n\n{web_res}"
+
+
+def read_local_file(
+    file_path: str,
+    start_line: int = 1,
+    end_line: int | None = None,
+    max_lines: int = 100,
+) -> str:
+    """Read a local documentation or knowledge file with 1-based line numbers.
+
+    Use this tool as a follow-up to `search_local_docs` to inspect surrounding context,
+    detailed remediation instructions, or specific sections around matched lines.
+
+    Args:
+        file_path: Relative or absolute path to the file (e.g. 'docs/slurm.md',
+            'resources/runbooks.json', 'resources/rules.json').
+        start_line: First line to read (1-based, inclusive, defaults to 1).
+        end_line: Last line to read (1-based, inclusive). If omitted, reads up to
+            max_lines starting from start_line.
+        max_lines: Maximum number of lines to display if end_line is omitted (default 100).
+
+    Returns:
+        Header with file path and line range, followed by line-numbered content:
+        'LineNo | Content'.
+    """
+    clean_p = file_path.strip().strip("'\"")
+    if not clean_p:
+        return "Please provide a valid file_path to read."
+
+    target = Path(clean_p)
+    if not target.is_file():
+        for prefix in [Path("docs"), Path("resources")]:
+            candidate = prefix / clean_p
+            if candidate.is_file():
+                target = candidate
+                break
+
+    if not target.is_file():
+        return (
+            f"File not found: '{file_path}'. "
+            f"Please verify the path returned by `search_local_docs`."
+        )
+
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except Exception as e:
+        return f"Error reading file '{file_path}': {e}"
+
+    total_lines = len(lines)
+    if total_lines == 0:
+        return f"[File: {target.as_posix()}] (Empty file)"
+
+    start_idx = max(1, start_line)
+    if end_line is not None:
+        end_idx = min(total_lines, max(start_idx, end_line))
+    else:
+        end_idx = min(total_lines, start_idx + max_lines - 1)
+
+    if start_idx > total_lines:
+        return (
+            f"[File: {target.as_posix()}] start_line {start_line} exceeds "
+            f"total lines ({total_lines})."
+        )
+
+    selected = lines[start_idx - 1 : end_idx]
+    formatted_lines: list[str] = [
+        f"=== [File: {target.as_posix()}] (Lines {start_idx}-{end_idx} of {total_lines}) ==="
+    ]
+    for idx, line in enumerate(selected, start=start_idx):
+        formatted_lines.append(f"{idx:4d} | {line}")
+
+    return "\n".join(formatted_lines)

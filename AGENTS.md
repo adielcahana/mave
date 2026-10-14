@@ -50,6 +50,7 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
 
 - `src/agent.py`: Production Pydantic-AI SRE agent with runbook tools, prompt grounding, and circuit breaker.
 - `src/config.py`: Application settings (`Settings`) with `.env` loading.
+- `src/main.py`: Unified streaming pipeline CLI & benchmark evaluation entry point.
 - `src/pipeline.py`: Two-tier streaming orchestrator (`HPCStreamPipeline`) connecting ingestion, filtering, rules, and agent escalation.
 - `src/evaluation.py`: Quantitative benchmark evaluation suite measuring classification accuracy, LLM bypass rate, and latency SLAs.
 - `src/split_data.py`: Deterministic dataset partitioning utility.
@@ -72,7 +73,6 @@ mave/
 ├── .gitignore            # Git ignore specification
 ├── AGENTS.md             # Project architecture, real repo state, and agent workflows (THIS FILE)
 ├── instructions.md       # Problem statement and requirements
-├── main.py               # Unified streaming pipeline CLI & benchmark evaluation entry point
 ├── pyproject.toml        # Dependencies, tool configurations (Ruff, Ty, Pytest)
 ├── README.md             # Public overview, quickstart, and CLI instructions
 ├── report.md             # Architectural submission report with deep dives
@@ -93,6 +93,7 @@ mave/
 │   ├── agent.py          # Pydantic-AI SRE agent and circuit breaker
 │   ├── config.py         # Pydantic-settings configuration
 │   ├── evaluation.py     # Evaluation metrics and SLA benchmark runner
+│   ├── main.py           # Unified streaming pipeline CLI & benchmark evaluation entry point
 │   ├── pipeline.py       # Two-tier streaming pipeline orchestrator
 │   ├── split_data.py     # Train/Val/Test data splitter
 │   ├── knowledge/
@@ -135,9 +136,9 @@ uv run ruff check .
 uv run ruff format .
 
 # 4. Pipeline execution / demo
-uv run python main.py
-uv run python main.py data/HPC.log --limit 500
-uv run python main.py --line "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
+uv run python src/main.py
+uv run python src/main.py data/HPC.log --limit 500
+uv run python src/main.py --line "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
 ```
 
 ---
