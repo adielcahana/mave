@@ -362,3 +362,31 @@ def test_format_string_restoration_and_group_names(tmp_path: Path) -> None:
     registry.register_template("T2", r"^(?P<beta>\w+)\s+(?P<gamma>\w+)$")
     names = registry.get_known_group_names()
     assert names == ["alpha", "beta", "gamma"]
+
+
+def test_known_groups_info_and_prompt_injection(tmp_path: Path) -> None:
+    """Verify get_known_groups_info tracks regex and examples and updates from incoming logs."""
+    registry = LogTemplateRegistry()
+    info = registry.get_known_groups_info()
+    assert "node" in info
+    assert "subsystem" in info
+    assert "timestamp" in info
+    assert info["node"]["pattern"] != ""
+    assert info["node"]["example"] != ""
+
+    # Parse incoming log to verify example updating
+    raw_incoming = "99999 node-888 switch_module psu 1110481498 1 PSU status ( off on )"
+    registry.parse(raw_incoming)
+
+    updated_info = registry.get_known_groups_info()
+    assert updated_info["node"]["example"] == "node-888"
+    assert updated_info["log_id"]["example"] == "99999"
+
+    # Test prompt injection with regex and examples
+    unparsed_event = LogEvent(raw="UNSEEN 123 service alert", is_unparsed=True)
+    prompt = _build_incident_prompt(unparsed_event, known_groups=updated_info)
+
+    assert "(?P<node>" in prompt
+    assert "node-888" in prompt
+    assert "(?P<subsystem>" in prompt
+    assert "(?P<timestamp>" in prompt

@@ -268,7 +268,7 @@ class LogPipeline:
                 event,
                 agent=self.agent,
                 settings=self.settings,
-                known_group_names=self.template_registry.get_known_group_names(),
+                known_groups=self.template_registry.get_known_groups_info(),
             )
 
             # If unparsed and returned a regex resolution, register new template immediately

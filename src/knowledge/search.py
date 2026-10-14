@@ -1,6 +1,7 @@
-"""External documentation and web knowledge retrieval tools for the SRE agent."""
+"""Local documentation (grep/jq) and web knowledge retrieval tools for the SRE agent."""
 
 import html
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -11,9 +12,10 @@ __all__ = [
     "search_external_knowledge",
     "search_local_docs",
     "search_web",
+    "search_web_docs",
 ]
 
-_DEFAULT_DOCS_DIR = Path("docs")
+_DEFAULT_SEARCH_PATHS = [Path("docs"), Path("resources")]
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
 
 
@@ -53,7 +55,6 @@ def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
     except Exception:
         return []
 
-    # Extract snippets and titles from DuckDuckGo HTML layout
     snippet_matches = re.findall(
         r'<a[^>]+class=[\'"]result__snippet[\'"][^>]*>(.*?)</a>',
         text,
@@ -81,112 +82,237 @@ def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
     return results
 
 
-def search_local_docs(
-    query: str,
-    docs_dir: Path | str | None = None,
-    max_results: int = 5,
-) -> list[dict[str, str]]:
-    """Scan local documentation files (.md, .txt, .rst) for relevant sections.
+def search_web_docs(query: str, max_results: int = 5) -> str:
+    """Query external technical documentation and web troubleshooting guides via DuckDuckGo.
+
+    Use this tool ONLY when local documentation and cluster runbooks (via `query_subsystem_docs`
+    and `search_local_docs`) do not contain sufficient guidance for an incident.
 
     Args:
-        query: Search keywords or phrases.
-        docs_dir: Directory containing documentation files.
-        max_results: Maximum number of document excerpts to return.
+        query: Specific search terms (e.g. 'lustre lnet configuration error',
+            'slurm controller deadlocks').
+        max_results: Maximum search result snippets to return (default 5).
 
     Returns:
-        List of dicts with 'source', 'excerpt', and 'path'.
-    """
-    target_dir = Path(docs_dir) if docs_dir is not None else _DEFAULT_DOCS_DIR
-    if not target_dir.is_dir():
-        return []
-
-    query_tokens = [w.lower() for w in query.split() if len(w) >= 3]
-    if not query_tokens:
-        return []
-
-    matches: list[dict[str, Any]] = []
-
-    for file_path in target_dir.rglob("*"):
-        if not file_path.is_file() or file_path.suffix.lower() not in {".md", ".txt", ".rst"}:
-            continue
-
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except Exception:
-            continue
-
-        # Split into paragraphs or markdown sections
-        paragraphs = re.split(r"\n\s*\n", content)
-        for p in paragraphs:
-            p_clean = p.strip()
-            if not p_clean:
-                continue
-            p_lower = p_clean.lower()
-            score = sum(1 for tok in query_tokens if tok in p_lower)
-            if score > 0:
-                matches.append(
-                    {
-                        "score": score,
-                        "source": file_path.name,
-                        "path": str(file_path),
-                        "excerpt": p_clean[:500],
-                    }
-                )
-
-    # Sort descending by match score
-    matches.sort(key=lambda m: m["score"], reverse=True)
-    return [
-        {"source": m["source"], "path": m["path"], "excerpt": m["excerpt"]}
-        for m in matches[:max_results]
-    ]
-
-
-def search_external_knowledge(query: str) -> str:
-    """Query external knowledge sources including local cluster documentation and web search.
-
-    Use this tool when standard cluster subsystem runbooks in `query_subsystem_docs`
-    do not contain sufficient diagnosis, or when investigating novel error messages,
-    third-party daemon faults, or hardware error codes.
-
-    Args:
-        query: Specific search query (e.g. 'slurm controller daemon hung',
-            'lustre filesystem lnet error', 'infiniband port degraded state').
-
-    Returns:
-        Structured excerpts from local documentation and online technical articles.
+        Structured excerpts with title, URL, and snippet text.
     """
     clean_q = query.strip()
     if not clean_q:
         return "Please provide a non-empty search query."
 
-    sections: list[str] = []
-
-    # 1. Search local documentation
-    local_hits = search_local_docs(clean_q)
-    if local_hits:
-        local_text = ["### Local Documentation Matches:"]
-        for hit in local_hits:
-            local_text.append(
-                f"- **Source:** {hit['source']} (`{hit['path']}`)\n  **Excerpt:** {hit['excerpt']}"
-            )
-        sections.append("\n\n".join(local_text))
-
-    # 2. Search web
-    web_hits = search_web(clean_q)
-    if web_hits:
-        web_text = ["### Web Documentation & Troubleshooting Guides:"]
-        for hit in web_hits:
-            web_text.append(
-                f"- **Title:** {hit['title']}\n"
-                f"  **URL:** {hit['url']}\n"
-                f"  **Snippet:** {hit['snippet']}"
-            )
-        sections.append("\n\n".join(web_text))
-
-    if not sections:
+    hits = search_web(clean_q, max_results=max_results)
+    if not hits:
         return (
-            f"No external documentation or web troubleshooting guides found for '{clean_q}'. "
+            f"No external web documentation or troubleshooting guides found for '{clean_q}'. "
             f"Please verify spelling or broaden the search terms."
         )
 
-    return "\n\n---\n\n".join(sections)
+    sections: list[str] = [f"### Web Search Results for '{clean_q}':"]
+    for hit in hits:
+        sections.append(
+            f"- **Title:** {hit['title']}\n  **URL:** {hit['url']}\n  **Snippet:** {hit['snippet']}"
+        )
+    return "\n\n".join(sections)
+
+
+def _parse_jq_filter(query: str) -> tuple[str, str] | None:
+    """Extract (field_name, expected_value) from common jq filter expressions.
+
+    Supports:
+      - select(.subsystem == "unix.hw")
+      - .subsystem == "unix.hw" or .subsystem="unix.hw"
+      - subsystem=unix.hw or subsystem="unix.hw"
+      - .keywords[] == "panic" or .keywords == "panic"
+    """
+    # Pattern: select(.field == "val") or .field == "val" or field="val"
+    m = re.match(
+        r"^(?:select\()?\s*\.?([\w.]+)(?:\[\])?\s*(?:==|=)\s*['\"]?([^'\"]+?)['\"]?\s*\)?$",
+        query.strip(),
+    )
+    if m:
+        field_name = m.group(1).split(".")[-1]
+        expected_val = m.group(2).strip().lower()
+        return field_name, expected_val
+    return None
+
+
+def _evaluate_json_match(
+    item: dict[str, Any],
+    query: str,
+    jq_filter: tuple[str, str] | None,
+) -> bool:
+    """Check if a JSON object matches a jq filter or general keyword/regex grep."""
+    if jq_filter is not None:
+        field_name, expected_val = jq_filter
+        if field_name in item:
+            val = item[field_name]
+            if isinstance(val, (list, tuple)):
+                return any(expected_val in str(x).lower() for x in val)
+            return expected_val in str(val).lower()
+        return False
+
+    # General keyword / regex grep across all fields in the JSON object
+    q_lower = query.lower()
+    for v in item.values():
+        if isinstance(v, (list, tuple)):
+            if any(q_lower in str(x).lower() for x in v):
+                return True
+        elif q_lower in str(v).lower():
+            return True
+    return False
+
+
+def _search_json_file(
+    file_path: Path,
+    query: str,
+    max_results: int = 3,
+) -> list[str]:
+    """Execute a jq-like query or field grep on a JSON file."""
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        data = json.loads(content)
+    except Exception:
+        return []
+
+    items = data if isinstance(data, list) else [data]
+    jq_filter = _parse_jq_filter(query)
+
+    # Check for simple field projection: e.g. .scenario or .remediation_steps
+    projection = None
+    if query.strip().startswith(".") and "==" not in query and "=" not in query:
+        projection = query.strip().lstrip(".").rstrip("[]")
+
+    matches: list[str] = []
+    for idx, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+
+        if projection and projection in item:
+            val_repr = json.dumps(item[projection], indent=2)
+            matches.append(f"[File: {file_path.as_posix()} #{idx} .{projection}]\n{val_repr}")
+            if len(matches) >= max_results:
+                break
+        elif _evaluate_json_match(item, query, jq_filter):
+            item_repr = json.dumps(item, indent=2)
+            matches.append(f"[File: {file_path.as_posix()} #{idx}]\n{item_repr}")
+            if len(matches) >= max_results:
+                break
+
+    return matches
+
+
+def _search_text_file(
+    file_path: Path,
+    query: str,
+    max_results: int = 5,
+) -> list[str]:
+    """Execute a grep-like line scan across a text or Markdown file."""
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return []
+
+    try:
+        pattern = re.compile(query, re.IGNORECASE)
+    except re.error:
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+
+    matches: list[str] = []
+    for line_no, line in enumerate(lines, start=1):
+        if pattern.search(line):
+            matches.append(f"{file_path.as_posix()}:{line_no}: {line.strip()}")
+            if len(matches) >= max_results:
+                break
+    return matches
+
+
+def search_local_docs(
+    query: str,
+    file_pattern: str = "*",
+    max_results: int = 5,
+    search_paths: list[Path | str] | None = None,
+) -> str:
+    """Search local documentation and cluster knowledge files using grep-like and jq-like queries.
+
+    Search Execution Mechanism:
+    - Text/Markdown files (.md, .txt, .rst, .log in docs/):
+      Executed as a grep-style regex/keyword scan line-by-line across files,
+      returning matching line numbers and excerpts.
+    - Structured JSON files (.json in resources/ and docs/):
+      Executed as jq-style filter expressions or field matching.
+      Supported query styles:
+        * jq filter expressions: e.g. `.subsystem == "unix.hw"`,
+          `select(.subsystem == "clusterfilesystem")`
+        * key=value filters: e.g. `subsystem=resourcemgmtdaeomon`, `keywords=panic`
+        * jq field extraction: `.[].scenario`, `.root_cause`
+        * keyword grep across records: scans all JSON fields for the query string/regex.
+
+    Always run `search_local_docs` first before escalating to web search.
+
+    Args:
+        query: Grep regex pattern for text files, or jq filter/field expression for JSON files.
+        file_pattern: Optional glob to target specific files (e.g. '*.md', '*.json').
+        max_results: Maximum number of matching entries to return.
+        search_paths: Optional list of directories or files to search.
+            Defaults to docs/ and resources/.
+
+    Returns:
+        Formatted excerpts and matching records with file paths and line numbers.
+    """
+    clean_q = query.strip()
+    if not clean_q:
+        return "Please provide a non-empty search query."
+
+    paths = [Path(p) for p in search_paths] if search_paths else _DEFAULT_SEARCH_PATHS
+    collected_files: list[Path] = []
+    for p in paths:
+        if p.is_file():
+            collected_files.append(p)
+        elif p.is_dir():
+            collected_files.extend(p.rglob(file_pattern))
+
+    if not collected_files:
+        return f"No documentation or knowledge files found in search paths: {paths}."
+
+    all_matches: list[str] = []
+    for file_path in sorted(collected_files):
+        if not file_path.is_file():
+            continue
+
+        ext = file_path.suffix.lower()
+        if ext == ".json":
+            matches = _search_json_file(file_path, clean_q, max_results=max_results)
+            all_matches.extend(matches)
+        elif ext in {".md", ".txt", ".rst", ".log", ".conf"}:
+            matches = _search_text_file(file_path, clean_q, max_results=max_results)
+            all_matches.extend(matches)
+
+        if len(all_matches) >= max_results:
+            break
+
+    if not all_matches:
+        return (
+            f"No local documentation or runbook matches found for '{clean_q}'. "
+            f"Executed search via grep across text/markdown files and jq on JSON runbooks/rules. "
+            f"If local documentation is exhausted, escalate to `search_web_docs`."
+        )
+
+    return "\n\n---\n\n".join(all_matches[:max_results])
+
+
+def search_external_knowledge(query: str) -> str:
+    """Composite knowledge search helper combining local doc search with web fallback."""
+    clean_q = query.strip()
+    if not clean_q:
+        return "Please provide a non-empty search query."
+
+    local_res = search_local_docs(clean_q)
+    no_local = (
+        "No local documentation or runbook matches found" in local_res
+        or "No documentation or knowledge files found" in local_res
+    )
+    if not no_local:
+        return f"### Local Documentation Matches:\n{local_res}"
+
+    web_res = search_web_docs(clean_q)
+    return f"{local_res}\n\n---\n\n{web_res}"

@@ -12,7 +12,11 @@ from src.knowledge.docs_db import (
     list_known_subsystems,
     query_subsystem_docs,
 )
-from src.knowledge.search import search_external_knowledge
+from src.knowledge.search import (
+    search_external_knowledge,
+    search_local_docs,
+    search_web_docs,
+)
 from src.rules.models import LogEvent, ProblemResolution, ProblemResolutionWithRegex
 
 __all__ = [
@@ -25,6 +29,8 @@ __all__ = [
     "query_subsystem_docs",
     "reset_circuit_breaker",
     "search_external_knowledge",
+    "search_local_docs",
+    "search_web_docs",
     "validate_suggested_regex",
 ]
 
@@ -33,14 +39,16 @@ Investigate cluster failure modes, determine root causes, assess incident severi
 and provide actionable, authoritative remediation steps grounded in official cluster runbooks.
 
 Operational Guidelines:
-1. Grounded Runbook Investigation:
-   - Before forming any diagnosis, query runbooks using `query_subsystem_docs`.
-   - Use incident subsystem name and symptom keywords (error codes, daemons, hardware).
+1. Grounded Runbook & Local Investigation:
+   - Always search local documentation first before escalating to web search.
+   - Query cluster runbooks using `query_subsystem_docs`.
+   - Use `search_local_docs` with grep-style regex queries for text/markdown docs or jq-style
+     filters (e.g. `.subsystem == "unix.hw"`, `keywords=panic`) for JSON runbooks/rules.
    - If the subsystem name is ambiguous or unknown, query `list_known_subsystems` first.
 
-2. External Knowledge & Web Search:
-   - If cluster runbooks (`query_subsystem_docs`) do not contain sufficient diagnosis,
-     query `search_external_knowledge` for local manuals and web troubleshooting guides.
+2. Web Search Fallback:
+   - Only if local runbooks and local documentation do not contain sufficient guidance,
+     query `search_web_docs` to search external technical documentation and web guides.
 
 3. Diagnostic Rigor:
    - Formulate a concise error summary and identify precise technical root cause from runbooks/docs.
@@ -154,7 +162,8 @@ def create_agent(
     )
     agent.tool_plain(query_subsystem_docs)
     agent.tool_plain(list_known_subsystems)
-    agent.tool_plain(search_external_knowledge)
+    agent.tool_plain(search_local_docs)
+    agent.tool_plain(search_web_docs)
 
     # Attach backwards-compatible tool mapping attribute
     object.__setattr__(agent, "_function_tools", agent._function_toolset.tools)
@@ -164,6 +173,7 @@ def create_agent(
 
 def _build_incident_prompt(
     log_event: LogEvent,
+    known_groups: dict[str, dict[str, str]] | list[str] | None = None,
     known_group_names: list[str] | None = None,
 ) -> str:
     """Format structured LogEvent fields into an incident prompt for SRE agent investigation."""
@@ -184,23 +194,40 @@ def _build_incident_prompt(
 
     base_prompt += (
         f"\nInstructions:\n"
-        f"1. Query subsystem runbooks via `query_subsystem_docs` "
-        f"(subsystem='{log_event.subsystem}', keyword='{log_event.event_type}').\n"
-        f"   If local runbooks do not document this error, use `search_external_knowledge`\n"
-        f"   to search cluster documentation and web troubleshooting guides.\n"
-        f"2. Diagnose the root cause and determine severity (CRITICAL, HIGH, MEDIUM, LOW, INFO).\n"
-        f"3. Provide ordered remediation steps and cite specific runbooks or web sources "
+        f"1. First search local knowledge using `query_subsystem_docs` "
+        f"(subsystem='{log_event.subsystem}', keyword='{log_event.event_type}')\n"
+        f"   or `search_local_docs` (grep regex on text docs, jq filters on JSON files).\n"
+        f"2. Only if local search yields no relevant match, query `search_web_docs` for "
+        f"external technical guides.\n"
+        f"3. Diagnose the root cause and determine severity (CRITICAL, HIGH, MEDIUM, LOW, INFO).\n"
+        f"4. Provide ordered remediation steps and cite specific runbooks or web sources "
         f"in citations_and_reasons."
     )
     if log_event.is_unparsed:
-        known_str = ", ".join(f"'{n}'" for n in known_group_names) if known_group_names else ""
+        groups_data = known_groups if known_groups is not None else known_group_names
         base_prompt += (
             "\n4. This log line was UNPARSED by all registered cluster log templates.\n"
             "You MUST formulate a Python regex with named capture groups (?P<name>...)\n"
             f"in `suggested_log_template_regex` that accurately parses: '{log_event.raw}'.\n"
             "You may define whatever named capture groups are appropriate for this log line.\n"
         )
-        if known_str:
+        if isinstance(groups_data, dict) and groups_data:
+            lines: list[str] = []
+            for grp, info in sorted(groups_data.items()):
+                pat = info.get("pattern", r"\S+")
+                ex = info.get("example", "")
+                if ex:
+                    lines.append(f"   - `(?P<{grp}>{pat})` (e.g., '{ex}')")
+                else:
+                    lines.append(f"   - `(?P<{grp}>{pat})`")
+            guide = "\n".join(lines)
+            base_prompt += (
+                "To maintain naming consistency across cluster logs, reuse existing group names "
+                f"and regex patterns where applicable:\n{guide}\n"
+                "Or introduce new descriptive names if the tokens represent new concepts.\n"
+            )
+        elif isinstance(groups_data, list) and groups_data:
+            known_str = ", ".join(f"'{n}'" for n in groups_data)
             base_prompt += (
                 "To maintain naming consistency, consider reusing existing group names "
                 f"where applicable: [{known_str}], or introduce new descriptive names.\n"
@@ -228,6 +255,7 @@ async def analyze_log(
     log_event: LogEvent,
     agent: Agent[Settings, ProblemResolution] | None = None,
     settings: Settings | None = None,
+    known_groups: dict[str, dict[str, str]] | list[str] | None = None,
     known_group_names: list[str] | None = None,
 ) -> ProblemResolution:
     """Analyze an HPC log event and return a grounded ProblemResolution or
@@ -258,7 +286,8 @@ async def analyze_log(
             raise RuntimeError("LLM circuit breaker open: requests throttled after failure")
         _circuit_breaker_open = False
 
-    prompt = _build_incident_prompt(log_event, known_group_names=known_group_names)
+    groups_info = known_groups if known_groups is not None else known_group_names
+    prompt = _build_incident_prompt(log_event, known_groups=groups_info)
 
     try:
         if not log_event.is_unparsed:

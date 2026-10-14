@@ -1,5 +1,6 @@
-"""Tests for external knowledge and web search tools."""
+"""Tests for local documentation (grep/jq) and web search tools."""
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -7,42 +8,121 @@ from src.knowledge.search import (
     search_external_knowledge,
     search_local_docs,
     search_web,
+    search_web_docs,
 )
 
 
-def test_search_local_docs(tmp_path: Path) -> None:
-    """Verify search_local_docs scans markdown and text files and scores by keyword."""
+def test_search_local_docs_grep_text(tmp_path: Path) -> None:
+    """Verify search_local_docs performs line-by-line grep with line numbers."""
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
 
     slurm_doc = docs_dir / "slurm.md"
     slurm_doc.write_text(
-        "# Slurm Troubleshooting\n\n"
+        "# Slurm Troubleshooting\n"
+        "Node state draining frequently occurs.\n"
         "If the slurmctld controller daemon is unresponsive, check socket connectivity.\n"
         "Restart the service using systemctl restart slurmctld.\n",
         encoding="utf-8",
     )
 
-    lustre_doc = docs_dir / "lustre.txt"
-    lustre_doc.write_text(
-        "Lustre Storage System\n\n"
-        "OST failover occurs when storage targets experience disk timeout.\n",
-        encoding="utf-8",
+    # Grep-like search by keyword
+    output = search_local_docs("slurmctld", search_paths=[docs_dir])
+    assert "slurm.md:3: If the slurmctld controller daemon is unresponsive" in output
+
+    # Grep regex search
+    regex_out = search_local_docs(r"systemctl\s+restart", search_paths=[docs_dir])
+    assert "slurm.md:4: Restart the service using systemctl restart slurmctld." in regex_out
+
+
+def test_search_local_docs_jq_json(tmp_path: Path) -> None:
+    """Verify search_local_docs executes jq-style queries on JSON files."""
+    res_dir = tmp_path / "resources"
+    res_dir.mkdir()
+
+    runbooks_file = res_dir / "runbooks.json"
+    runbooks_data = [
+        {
+            "subsystem": "unix.hw",
+            "scenario": "Network interface alt0 down",
+            "root_cause": "NIFF heartbeat lost on interface alt0",
+            "remediation_steps": ["Check physical cable seating", "Run ifconfig alt0 up"],
+            "keywords": ["alt0", "down", "niff"],
+        },
+        {
+            "subsystem": "clusterfilesystem",
+            "scenario": "Domain panic on volume /data",
+            "root_cause": "AdvFS metadata corruption halts I/O",
+            "remediation_steps": ["Unmount volume", "Run advfsck"],
+            "keywords": ["panic", "advfs", "corruption"],
+        },
+    ]
+    runbooks_file.write_text(json.dumps(runbooks_data), encoding="utf-8")
+
+    # JQ filter style: .subsystem == "unix.hw"
+    jq_out = search_local_docs('.subsystem == "unix.hw"', search_paths=[res_dir])
+    assert "Network interface alt0 down" in jq_out
+    assert "unix.hw" in jq_out
+    assert "AdvFS" not in jq_out
+
+    # JQ filter style: select(.subsystem == "clusterfilesystem")
+    select_out = search_local_docs(
+        'select(.subsystem == "clusterfilesystem")',
+        search_paths=[res_dir],
     )
+    assert "Domain panic on volume /data" in select_out
+    assert "advfsck" in select_out
 
-    # Search matching slurm
-    results = search_local_docs("slurmctld daemon unresponsive", docs_dir=docs_dir)
-    assert len(results) > 0
-    assert results[0]["source"] == "slurm.md"
-    assert "slurmctld" in results[0]["excerpt"]
+    # Key=value filter style
+    kv_out = search_local_docs("subsystem=unix.hw", search_paths=[res_dir])
+    assert "Network interface alt0 down" in kv_out
 
-    # Search with no match
-    no_results = search_local_docs("kubernetes pod eviction", docs_dir=docs_dir)
-    assert len(no_results) == 0
+    # JQ keyword array filter
+    kw_out = search_local_docs('.keywords[] == "panic"', search_paths=[res_dir])
+    assert "Domain panic on volume /data" in kw_out
 
-    # Search with empty query
-    empty_results = search_local_docs("", docs_dir=docs_dir)
-    assert len(empty_results) == 0
+    # JQ field projection: .scenario
+    proj_out = search_local_docs(".scenario", search_paths=[res_dir])
+    assert "Network interface alt0 down" in proj_out
+    assert "Domain panic on volume /data" in proj_out
+
+
+def test_search_local_docs_empty_and_no_match(tmp_path: Path) -> None:
+    """Verify search_local_docs handles empty query and no matches gracefully."""
+    empty_out = search_local_docs("")
+    assert "Please provide a non-empty search query" in empty_out
+
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    no_match_out = search_local_docs("unknown_symbol_error", search_paths=[empty_dir])
+    assert "No documentation or knowledge files found" in no_match_out or "No local" in no_match_out
+
+
+def test_search_web_docs_formatting() -> None:
+    """Verify search_web_docs formats search results into markdown."""
+    with patch(
+        "src.knowledge.search.search_web",
+        return_value=[
+            {
+                "title": "Slurm Troubleshooting Guide",
+                "snippet": "Resolving node draining and controller deadlocks.",
+                "url": "https://slurm.schedmd.com/troubleshoot.html",
+            }
+        ],
+    ):
+        output = search_web_docs("slurm deadlock")
+
+    assert "### Web Search Results for 'slurm deadlock':" in output
+    assert "**Title:** Slurm Troubleshooting Guide" in output
+    assert "https://slurm.schedmd.com/troubleshoot.html" in output
+    assert "controller deadlocks" in output
+
+
+def test_search_web_docs_no_results() -> None:
+    """Verify search_web_docs handles empty results gracefully."""
+    with patch("src.knowledge.search.search_web", return_value=[]):
+        output = search_web_docs("completely_nonexistent_hpc_error_xyz")
+    assert "No external web documentation" in output
 
 
 def test_search_web_parses_html() -> None:
@@ -77,16 +157,12 @@ def test_search_web_handles_network_error() -> None:
     assert hits == []
 
 
-def test_search_external_knowledge_aggregates(tmp_path: Path) -> None:
-    """Verify search_external_knowledge aggregates local docs and web results."""
-    docs_dir = tmp_path / "docs"
-    docs_dir.mkdir()
-    (docs_dir / "ib.md").write_text(
-        "InfiniBand link degradation: clean transceiver optic pins.",
-        encoding="utf-8",
-    )
+def test_search_external_knowledge_composite(tmp_path: Path) -> None:
+    """Verify search_external_knowledge falls back to web if local has no hits."""
+    empty_dir = tmp_path / "empty_docs"
+    empty_dir.mkdir()
 
-    with patch("src.knowledge.search._DEFAULT_DOCS_DIR", docs_dir):
+    with patch("src.knowledge.search._DEFAULT_SEARCH_PATHS", [empty_dir]):
         with patch(
             "src.knowledge.search.search_web",
             return_value=[
@@ -99,13 +175,5 @@ def test_search_external_knowledge_aggregates(tmp_path: Path) -> None:
         ):
             output = search_external_knowledge("InfiniBand symbol error")
 
-    assert "Local Documentation Matches" in output
-    assert "ib.md" in output
-    assert "Web Documentation & Troubleshooting Guides" in output
+    assert "Web Search Results" in output
     assert "Mellanox InfiniBand" in output
-    assert "https://mellanox.com/ib" in output
-
-
-def test_search_external_knowledge_empty_query() -> None:
-    output = search_external_knowledge("   ")
-    assert "Please provide a non-empty search query" in output

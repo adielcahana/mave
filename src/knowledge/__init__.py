@@ -1,4 +1,4 @@
-"""LANL HPC Subsystem Knowledge Base, Runbooks, and External Knowledge package."""
+"""LANL HPC Subsystem Knowledge Base, Runbooks, and Documentation Search package."""
 
 from src.knowledge.docs_db import (
     RunbookEntry,
@@ -15,6 +15,7 @@ from src.knowledge.search import (
     search_external_knowledge,
     search_local_docs,
     search_web,
+    search_web_docs,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "search_external_knowledge",
     "search_local_docs",
     "search_web",
+    "search_web_docs",
 ]

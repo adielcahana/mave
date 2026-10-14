@@ -37,8 +37,11 @@ def test_agent_tool_registry() -> None:
     assert "list_known_subsystems" in tool_keys, (
         f"Expected 'list_known_subsystems' in agent tools, found: {tool_keys}"
     )
-    assert "search_external_knowledge" in tool_keys, (
-        f"Expected 'search_external_knowledge' in agent tools, found: {tool_keys}"
+    assert "search_local_docs" in tool_keys, (
+        f"Expected 'search_local_docs' in agent tools, found: {tool_keys}"
+    )
+    assert "search_web_docs" in tool_keys, (
+        f"Expected 'search_web_docs' in agent tools, found: {tool_keys}"
     )
 
     # Backwards-compatible _function_tools check
@@ -46,7 +49,8 @@ def test_agent_tool_registry() -> None:
     if isinstance(fn_tools, dict):
         assert "query_subsystem_docs" in fn_tools
         assert "list_known_subsystems" in fn_tools
-        assert "search_external_knowledge" in fn_tools
+        assert "search_local_docs" in fn_tools
+        assert "search_web_docs" in fn_tools
 
 
 def test_problem_resolution_schema_validation() -> None:

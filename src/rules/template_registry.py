@@ -19,6 +19,59 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_TEMPLATES_PATH = Path("resources/log_templates.json")
 
+DEFAULT_GROUP_EXAMPLES: dict[str, str] = {
+    "log_id": "1117769919",
+    "node": "node-25",
+    "subsystem": "clusterfilesystem",
+    "event_type": "fdmn.panic",
+    "timestamp": "1117769919",
+    "flag": "1",
+    "message": "ServerFileSystem domain root_domain is full",
+    "priority": "165",
+    "version": "1",
+    "procid": "1234",
+    "msgid": "ID47",
+}
+
+
+def extract_group_patterns(regex: str) -> dict[str, str]:
+    """Extract mapping of named capture groups to their inner pattern from a regex string."""
+    results: dict[str, str] = {}
+    i = 0
+    n = len(regex)
+    while i < n:
+        if regex[i : i + 4] == "(?P<":
+            end_name = regex.find(">", i + 4)
+            if end_name != -1:
+                name = regex[i + 4 : end_name]
+                depth = 1
+                j = end_name + 1
+                in_escape = False
+                in_char_class = False
+                while j < n and depth > 0:
+                    ch = regex[j]
+                    if in_escape:
+                        in_escape = False
+                    elif ch == "\\":
+                        in_escape = True
+                    elif ch == "[" and not in_char_class:
+                        in_char_class = True
+                    elif ch == "]" and in_char_class:
+                        in_char_class = False
+                    elif not in_char_class:
+                        if ch == "(":
+                            depth += 1
+                        elif ch == ")":
+                            depth -= 1
+                    j += 1
+                if depth == 0:
+                    inner_pattern = regex[end_name + 1 : j - 1]
+                    results[name] = inner_pattern
+                    i = j
+                    continue
+        i += 1
+    return results
+
 
 def derive_format_string(pattern: re.Pattern[Any], sample_raw_log: str) -> str:
     """Derive a format template reconstructing sample_raw_log from named capture groups."""
@@ -79,6 +132,8 @@ class LogTemplateRegistry:
         self.templates: list[dict[str, Any]] = []
         self._compiled_regex: re.Pattern[str] | None = None
         self._branch_map: dict[str, dict[str, Any]] = {}
+        self._group_patterns: dict[str, str] = {}
+        self._group_examples: dict[str, str] = dict(DEFAULT_GROUP_EXAMPLES)
         self.load_templates()
 
     def load_templates(self) -> None:
@@ -96,6 +151,13 @@ class LogTemplateRegistry:
             self.templates = []
 
         self._compile_disjunction()
+        for item in self.templates:
+            raw_regex = item.get("regex", "").strip()
+            if raw_regex:
+                patterns = extract_group_patterns(raw_regex)
+                for grp, pat in patterns.items():
+                    if grp not in self._group_patterns or len(pat) > len(self._group_patterns[grp]):
+                        self._group_patterns[grp] = pat
 
     def _compile_disjunction(self) -> None:
         """Compile all registered templates into a single combined regex disjunction."""
@@ -133,18 +195,25 @@ class LogTemplateRegistry:
         combined_pattern = "|".join(branches)
         self._compiled_regex = re.compile(combined_pattern)
 
+    def update_group_examples(self, values: dict[str, Any]) -> None:
+        """Update example values for known groups from incoming log events."""
+        for k, v in values.items():
+            if v is not None and str(v).strip():
+                self._group_examples[k] = str(v).strip()
+
+    def get_known_groups_info(self) -> dict[str, dict[str, str]]:
+        """Return dictionary of known named groups with their regex pattern and latest example."""
+        info: dict[str, dict[str, str]] = {}
+        for key in sorted(self._group_patterns.keys()):
+            info[key] = {
+                "pattern": self._group_patterns.get(key, r"\S+"),
+                "example": self._group_examples.get(key, ""),
+            }
+        return info
+
     def get_known_group_names(self) -> list[str]:
         """Return unique sorted list of named capture groups across registered templates."""
-        names: set[str] = set()
-        for item in self.templates:
-            raw_regex = item.get("regex", "").strip()
-            if raw_regex:
-                try:
-                    rx = re.compile(raw_regex)
-                    names.update(rx.groupindex.keys())
-                except Exception:
-                    pass
-        return sorted(names)
+        return sorted(self._group_patterns.keys())
 
     def parse(self, raw_line: str) -> LogEvent:
         """Parse a raw log line using combined regex disjunction or fallback.
@@ -172,6 +241,10 @@ class LogTemplateRegistry:
                         if group_name.startswith(prefix) and val is not None:
                             field_name = group_name[len(prefix) :]
                             extracted[field_name] = val
+
+                    # Update latest representative example values for known groups
+                    # from incoming logs
+                    self.update_group_examples(extracted)
 
                     # If format_string was not pre-stored on template, derive it from this match
                     if not format_str:
@@ -255,6 +328,19 @@ class LogTemplateRegistry:
             try:
                 rx = re.compile(regex)
                 format_string = derive_format_string(rx, sample_raw_log)
+            except Exception:
+                pass
+
+        patterns = extract_group_patterns(regex)
+        for grp, pat in patterns.items():
+            self._group_patterns[grp] = pat
+
+        if sample_raw_log:
+            try:
+                rx = re.compile(regex)
+                m = rx.search(sample_raw_log)
+                if m:
+                    self.update_group_examples(m.groupdict())
             except Exception:
                 pass
 
