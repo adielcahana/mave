@@ -6,7 +6,7 @@ benign telemetry filtration and fast-path resolution, with SRE agent fallback an
 
 import asyncio
 import time
-from collections.abc import AsyncIterable, AsyncIterator, Callable, Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -62,6 +62,10 @@ class LogProcessingStats:
     source_name: SourceName = "Stream"
     file_name: str = ""
     total_lines: int = 0
+    processed_count: int = 0
+    fast_lane_count: int = 0
+    llm_lane_count: int = 0
+    active_llm_count: int = 0
     benign_count: int = 0
     error_count: int = 0
     auto_annotated_count: int = 0
@@ -75,12 +79,25 @@ class LogProcessingStats:
         if not self.file_name:
             self.file_name = self.source_name
 
+    @property
+    def remaining_count(self) -> int:
+        """Return number of log lines not yet completed."""
+        return max(self.total_lines - self.processed_count, 0)
+
     def record_result(self, result: PipelineResult) -> None:
         """Accumulate counts, costs, and deduplicated errors from a pipeline result."""
+        self.processed_count += 1
         self.total_cost_usd += result.cost_usd
+
+        if result.cost_usd > 0.0 or result.status == "AGENT_RESOLVED":
+            self.llm_lane_count += 1
+        else:
+            self.fast_lane_count += 1
 
         if result.status == "TELEMETRY_FILTERED":
             self.benign_count += 1
+            if result.cost_usd > 0.0:
+                self.llm_needed_count += 1
             return
 
         self.error_count += 1
@@ -131,6 +148,8 @@ class LogPipeline:
         self.agent_cost_usd: float = agent_cost_usd
         self.persist_runbooks: bool = persist_runbooks
         self.concurrency_limit: int | None = concurrency_limit
+        self.active_llm_count: int = 0
+        self._active_stats: list[LogProcessingStats] = []
         self._callbacks: list[Callable[[PipelineResult], Any]] = []
         if on_result is not None:
             self._callbacks.append(on_result)
@@ -145,8 +164,14 @@ class LogPipeline:
         if callback in self._callbacks:
             self._callbacks.remove(callback)
 
+    def _sync_active_llm(self) -> None:
+        """Synchronize in-flight LLM count across active stats collectors."""
+        for stats in self._active_stats:
+            stats.active_llm_count = self.active_llm_count
+
     def _notify_result(self, result: PipelineResult) -> PipelineResult:
         """Dispatch a PipelineResult to all registered callbacks and return the result."""
+        self._sync_active_llm()
         for cb in self._callbacks:
             try:
                 cb(result)
@@ -167,12 +192,16 @@ class LogPipeline:
             file_name=file_name or source_name,
             total_lines=total_lines,
         )
+        self._active_stats.append(stats)
         self.add_callback(stats.record_result)
         start_time = time.perf_counter()
         try:
             yield stats
         finally:
             self.remove_callback(stats.record_result)
+            if stats in self._active_stats:
+                self._active_stats.remove(stats)
+            stats.active_llm_count = 0
             stats.finalize(time.perf_counter() - start_time)
 
     async def analyze(
@@ -230,17 +259,24 @@ class LogPipeline:
     ) -> tuple[ProblemResolution, PipelineResult]:
         """Escalate event to the SRE Agent, register/dedup learned rules, and build result."""
         log_id = str(event.get("log_id", ""))
-        resolution = await analyze_log(
-            event,
-            known_groups=self.rule_engine.get_known_groups_info(),
-        )
-        self.rule_engine.create_rule_from_resolution(event, resolution)
-        if not resolution.is_benign:
-            create_runbook_from_resolution(
+        self.active_llm_count += 1
+        self._sync_active_llm()
+        try:
+            resolution = await analyze_log(
                 event,
-                resolution,
-                persist=self.persist_runbooks,
+                known_groups=self.rule_engine.get_known_groups_info(),
             )
+            self.rule_engine.create_rule_from_resolution(event, resolution)
+            if not resolution.is_benign:
+                create_runbook_from_resolution(
+                    event,
+                    resolution,
+                    persist=self.persist_runbooks,
+                )
+        finally:
+            self.active_llm_count = max(self.active_llm_count - 1, 0)
+            self._sync_active_llm()
+
         latency_ms = (time.perf_counter() - start) * 1000.0
         if resolution.is_benign:
             res = self._notify_result(
@@ -296,20 +332,14 @@ class LogPipeline:
             sem = asyncio.Semaphore(limit)
 
             async def _worker(line: str) -> PipelineResult:
+                if "process_log" not in self.__dict__:
+                    start = time.perf_counter()
+                    event, matched_rule = self.rule_engine.match(line)
+                    fast_res = self._match_fast_path(event, matched_rule, start)
+                    if fast_res is not None:
+                        return fast_res
                 async with sem:
                     return await self.process_log(line)
 
             return list(await asyncio.gather(*(_worker(line) for line in log_list)))
         return list(await asyncio.gather(*(self.process_log(line) for line in log_list)))
-
-    async def process_stream(
-        self,
-        stream: AsyncIterable[str] | Iterable[str],
-    ) -> AsyncIterator[PipelineResult]:
-        """Process an asynchronous or synchronous iterable of log lines."""
-        if isinstance(stream, AsyncIterable):
-            async for raw_line in stream:
-                yield await self.process_log(raw_line)
-        else:
-            for raw_line in stream:
-                yield await self.process_log(raw_line)

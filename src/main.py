@@ -1,6 +1,5 @@
 """HPC Log Stream Automated Problem Resolution Engine & CLI."""
 
-# ruff: noqa: E402
 import argparse
 import asyncio
 import io
@@ -9,6 +8,22 @@ import os
 import re
 import sys
 from pathlib import Path
+
+from rich import box
+from rich.console import Console, Group, RenderableType
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
+from rich.table import Table
+from rich.text import Text
 
 # Ensure repository root is on sys.path for direct script execution (`python src/main.py`)
 _repo_root = Path(__file__).resolve().parent.parent
@@ -21,17 +36,83 @@ os.environ["PYDANTIC_AI_NO_BANNER"] = "1"
 if sys.platform == "win32" and isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from rich import box
-from rich.console import Console, Group
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-
-from src.evaluation import evaluate_benchmark
-from src.pipeline import LogPipeline, LogProcessingStats, SourceName
-from src.rules.engine import RuleTreeEngine
+from src.evaluation import evaluate_benchmark  # noqa: E402
+from src.pipeline import (  # noqa: E402
+    LogPipeline,
+    LogProcessingStats,
+    PipelineResult,
+    SourceName,
+)
+from src.rules.engine import RuleTreeEngine  # noqa: E402
 
 console = Console()
+
+
+class _LiveProgressMonitor:
+    """Rich live renderable showing real-time Fast Lane, LLM Lane, and Remaining counts."""
+
+    def __init__(self, stats: LogProcessingStats, pipeline: LogPipeline) -> None:
+        self.stats = stats
+        self.pipeline = pipeline
+        self.progress = Progress(
+            SpinnerColumn(style="bold cyan"),
+            TextColumn("[bold bright_white]{task.description}[/]"),
+            BarColumn(bar_width=40, complete_style="cyan", finished_style="bright_green"),
+            MofNCompleteColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+            expand=True,
+        )
+        self.task_id = self.progress.add_task(
+            f"Streaming {stats.file_name}",
+            total=stats.total_lines,
+        )
+
+    def on_result(self, _result: PipelineResult) -> None:
+        """Advance progress bar when a log line finishes processing."""
+        self.progress.update(self.task_id, completed=self.stats.processed_count)
+
+    def __rich__(self) -> RenderableType:
+        s = self.stats
+        self.progress.update(self.task_id, completed=s.processed_count)
+
+        wire_benign = max(s.fast_lane_count - s.auto_annotated_count, 0)
+        in_flight = self.pipeline.active_llm_count
+        queued = max(s.remaining_count - in_flight, 0)
+        total_rules = len(self.pipeline.rule_engine.rules)
+        total_envelopes = len(self.pipeline.rule_engine.envelopes)
+
+        lane_table = Table(box=box.SIMPLE_HEAD, expand=True, padding=(0, 2))
+        lane_table.add_column("⚡ Fast Lane (Wire-Speed)", justify="left", style="bold green")
+        lane_table.add_column("🤖 LLM Lane (SRE Agent)", justify="left", style="bold magenta")
+        lane_table.add_column("⏳ Remaining", justify="left", style="bold yellow")
+        lane_table.add_column("📖 Rule Tree", justify="left", style="bold cyan")
+
+        fast_detail = (
+            f"[bold green]{s.fast_lane_count}[/] done "
+            f"[dim]({wire_benign} benign, {s.auto_annotated_count} rules)[/]"
+        )
+        llm_detail = (
+            f"[bold magenta]{s.llm_lane_count}[/] done • "
+            f"[bold bright_magenta]{in_flight} active[/] "
+            f"[dim](${s.total_cost_usd:.4f})[/]"
+        )
+        rem_detail = (
+            f"[bold yellow]{s.remaining_count}[/] left "
+            f"[dim]({queued} queued, {in_flight} in LLM)[/]"
+        )
+        rules_detail = f"[bold cyan]{total_rules}[/] rules [dim]({total_envelopes} envelopes)[/]"
+
+        lane_table.add_row(fast_detail, llm_detail, rem_detail, rules_detail)
+
+        return Panel(
+            Group(self.progress, lane_table),
+            title="[bold cyan]Live Stream Triage Progress[/]",
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
 
 
 def _format_severity_badge(severity: str) -> Text:
@@ -127,15 +208,36 @@ async def analyze_log_lines(
     pipeline: LogPipeline | None = None,
     concurrency_limit: int | None = 5,
     file_name: str = "",
+    show_progress: bool = False,
 ) -> LogProcessingStats:
     """Analyze a list of log lines concurrently via asyncio and return stats and remedies."""
     pipe = pipeline or LogPipeline()
-    return await pipe.analyze(
-        raw_lines,
+    if not show_progress:
+        return await pipe.analyze(
+            raw_lines,
+            source_name=source_name,
+            concurrency_limit=concurrency_limit,
+            file_name=file_name,
+        )
+
+    with pipe.collect_stats(
         source_name=source_name,
-        concurrency_limit=concurrency_limit,
+        total_lines=len(raw_lines),
         file_name=file_name,
-    )
+    ) as stats:
+        monitor = _LiveProgressMonitor(stats=stats, pipeline=pipe)
+        pipe.add_callback(monitor.on_result)
+        try:
+            with Live(
+                monitor,
+                console=console,
+                refresh_per_second=8,
+                transient=True,
+            ):
+                await pipe.process_logs(raw_lines, concurrency_limit=concurrency_limit)
+        finally:
+            pipe.remove_callback(monitor.on_result)
+    return stats
 
 
 async def analyze_log_file(
@@ -143,6 +245,7 @@ async def analyze_log_file(
     limit: int | None = None,
     pipeline: LogPipeline | None = None,
     concurrency_limit: int | None = 5,
+    show_progress: bool = False,
 ) -> LogProcessingStats:
     """Analyze a log file and return quantitative statistics and remedy recommendations."""
     path = Path(file_path)
@@ -153,6 +256,7 @@ async def analyze_log_file(
         pipeline=pipeline,
         concurrency_limit=concurrency_limit,
         file_name=path.name,
+        show_progress=show_progress,
     )
 
 
@@ -432,11 +536,13 @@ def main() -> None:
         )
         console.print()
 
-        with console.status(
-            "[bold cyan]Processing log line...[/]",
-            spinner="dots",
-        ):
-            stats = asyncio.run(analyze_log_lines([log_line], source_name="CLI Input"))
+        stats = asyncio.run(
+            analyze_log_lines(
+                [log_line],
+                source_name="CLI Input",
+                show_progress=True,
+            )
+        )
 
         render_stats_dashboard(stats)
         return
@@ -445,17 +551,14 @@ def main() -> None:
 
     render_header(subtitle=f"Ingesting log stream from: {target_file}")
 
-    with console.status(
-        f"[bold cyan]Processing log stream from {target_file}...[/]",
-        spinner="dots",
-    ):
-        stats = asyncio.run(
-            analyze_log_file(
-                target_file,
-                limit=args.limit,
-                concurrency_limit=args.concurrency,
-            )
+    stats = asyncio.run(
+        analyze_log_file(
+            target_file,
+            limit=args.limit,
+            concurrency_limit=args.concurrency,
+            show_progress=True,
         )
+    )
 
     render_stats_dashboard(stats)
 

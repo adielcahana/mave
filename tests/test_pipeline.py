@@ -304,7 +304,7 @@ async def test_pipeline_concurrent_post_facto_deduplication(
 
     idx = 0
 
-    async def mock_analyze(*args: object, **kwargs: object) -> ProblemResolution:
+    async def mock_analyze(*_args: object, **_kwargs: object) -> ProblemResolution:
         nonlocal idx
         idx += 1
         await asyncio.sleep(0.01)
@@ -321,8 +321,9 @@ async def test_pipeline_concurrent_post_facto_deduplication(
 
 
 def test_log_processing_stats_recording(mock_resolution: ProblemResolution) -> None:
-    """Verify LogProcessingStats records outcomes and timing correctly."""
-    stats = LogProcessingStats(source_name="File", file_name="test.log", total_lines=3)
+    """Verify LogProcessingStats records outcomes, lane counts, and timing correctly."""
+    stats = LogProcessingStats(source_name="File", file_name="test.log", total_lines=4)
+    assert stats.remaining_count == 4
 
     r_benign = PipelineResult(log_id="1", status="TELEMETRY_FILTERED", cost_usd=0.0)
     r_fast = PipelineResult(
@@ -341,6 +342,10 @@ def test_log_processing_stats_recording(mock_resolution: ProblemResolution) -> N
     stats.record_results([r_benign, r_fast, r_agent])
     stats.finalize(0.01)
 
+    assert stats.processed_count == 3
+    assert stats.remaining_count == 1
+    assert stats.fast_lane_count == 2
+    assert stats.llm_lane_count == 1
     assert stats.benign_count == 1
     assert stats.error_count == 2
     assert stats.auto_annotated_count == 1
