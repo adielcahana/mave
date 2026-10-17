@@ -39,9 +39,6 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
    │     └──► Actionable Child Rule ───► Fast-path resolution (<0.05ms, $0)
    │
    └── Novel / Unmatched Message
-         │
-         ▼
-[Circuit Breaker / Debouncer] ─────────► Guardrail shielding against API outages & storms
          │ (Incident escalation)
          ▼
 [Tier 2: SRE Resolution Agent] ────────► Pydantic-AI + NVIDIA NIM + Domain Runbooks
@@ -52,19 +49,16 @@ High Performance Computing (HPC) clusters generate large-scale, semi-structured 
 
 ### Core Modules (`src/`)
 
-- `src/agent.py`: Production Pydantic-AI SRE agent with runbook tools, prompt grounding, and circuit breaker.
-- `src/config.py`: Application settings (`Settings`) with `.env` loading.
+- `src/agent.py`: Production Pydantic-AI SRE agent with runbook search tools, prompt grounding, and `ModelRetry` regex output validation.
+- `src/config.py`: Application settings (`Settings`) with `.env` loading and cached singleton access.
 - `src/main.py`: Unified streaming pipeline CLI & benchmark evaluation entry point.
-- `src/pipeline.py`: Two-tier streaming orchestrator (`HPCStreamPipeline`) connecting ingestion, regex tree filtering/rules, and agent escalation.
+- `src/pipeline.py`: Two-tier streaming orchestrator (`LogPipeline`, `LogProcessingStats`, `PipelineResult`, `SourceName`) connecting ingestion, regex tree filtering/rules, and agent escalation.
 - `src/evaluation.py`: Quantitative benchmark evaluation suite measuring classification accuracy, LLM bypass rate, and latency SLAs.
 - `src/split_data.py`: Deterministic dataset partitioning utility.
-- `src/knowledge/docs_db.py`: In-memory knowledge base indexing LANL cluster runbooks with dynamic learning and persistence.
-- `src/knowledge/search.py`: External technical documentation retrieval (DuckDuckGo web search and local Markdown/text docs scanner).
-- `src/rules/engine.py`: High-throughput two-tier regex tree matching engine (`RuleTreeEngine`, `ParentEnvelope`) with dynamic LRU caching.
-- `src/rules/models.py`: Strongly-typed domain models (`LogEvent`, `ParentEnvelope`, `Rule`, `ProblemResolution`, `RemediationStep`, `SeverityLevel`).
-- `src/rules/normalizer.py`: High-performance semi-structured log line parser.
-- `src/rules/telemetry_filter.py`: Sub-millisecond pre-filter eliminating benign heartbeats.
-- `src/rules/template_registry.py`: Dynamic single-pass regex template extractor and unparsed triage monitor.
+- `src/knowledge/docs_db.py`: In-memory knowledge base indexing cluster runbooks with dynamic learning and persistence.
+- `src/knowledge/search.py`: External technical documentation retrieval (async DuckDuckGo web search and local Markdown/text/JSON docs scanner).
+- `src/rules/engine.py`: Single-pass two-tier Regex Tree matching engine (`RuleTreeEngine`) with dynamic parent envelope and child rule synthesis and post-facto deduplication.
+- `src/rules/models.py`: Strongly-typed domain models (`LogEvent`, `ParentEnvelope`, `Rule`, `ProblemResolution`, `RuleType`, `ValidationStatus`).
 
 ---
 
@@ -87,39 +81,31 @@ mave/
 │   ├── README.md         # Benchmark citation details
 │   └── splits/           # Train/Val/Test partitions (generated, gitignored)
 ├── resources/
-│   ├── log_templates.json # Pre-compiled regex log templates
-│   ├── rules.json        # Seed fast-path remediation rules
-│   └── runbooks.json     # Subsystem failure recovery runbooks
-├── rules/
-│   └── rules.json        # Production rule registry
+│   ├── rules.json        # Hierarchical Regex Tree (ParentEnvelope & Child Rules)
+│   └── runbooks.json     # Failure recovery runbooks
 ├── src/
 │   ├── __init__.py
-│   ├── agent.py          # Pydantic-AI SRE agent and circuit breaker
-│   ├── config.py         # Pydantic-settings configuration
+│   ├── agent.py          # Pydantic-AI SRE agent & output validator
+│   ├── config.py         # Pydantic-settings configuration singleton
 │   ├── evaluation.py     # Evaluation metrics and SLA benchmark runner
 │   ├── main.py           # Unified streaming pipeline CLI & benchmark evaluation entry point
 │   ├── pipeline.py       # Two-tier streaming pipeline orchestrator
 │   ├── split_data.py     # Train/Val/Test data splitter
 │   ├── knowledge/
 │   │   ├── __init__.py
-│   │   ├── docs_db.py    # Subsystem runbooks & knowledge base
-│   │   └── search.py     # Web search & local docs retrieval tools
+│   │   ├── docs_db.py    # Runbooks & knowledge base search
+│   │   └── search.py     # Async web search & local docs retrieval tools
 │   └── rules/
 │       ├── __init__.py
-│       ├── engine.py     # RuleTreeEngine & resolution cache
-│       ├── models.py     # Domain data models & schemas
-│       ├── normalizer.py # Semi-structured log parser
-│       ├── telemetry_filter.py # Wire-speed benign telemetry filter
-│       └── template_registry.py # Regex template extraction & triage
+│       ├── engine.py     # Unified RuleTreeEngine (ParentEnvelope -> Child Rule)
+│       └── models.py     # Generic key-value LogEvent & Regex Tree domain models
 └── tests/
-    ├── test_agent.py             # SRE agent tool-calling, circuit breaker & error handling tests
-    ├── test_docs_db.py           # Knowledge base lookup & search tests
-    ├── test_evaluation.py        # Benchmark metrics & scoring tests
-    ├── test_normalizer.py        # Log parsing & header extraction tests
-    ├── test_pipeline.py          # Stream pipeline, caching & debouncing tests
-    ├── test_rule_engine.py       # Rule matching, indexing & triage tests
-    ├── test_search.py            # External web search & local docs retrieval tests
-    └── test_template_registry.py # Regex template extraction & registry tests
+    ├── test_agent.py       # SRE agent tool-calling & regex output validation tests
+    ├── test_docs_db.py     # Knowledge base lookup & search tests
+    ├── test_evaluation.py  # Benchmark metrics & scoring tests
+    ├── test_pipeline.py    # Stream pipeline & dynamic rule learning tests
+    ├── test_rule_engine.py # Regex tree matching, persistence & validation tests
+    └── test_search.py      # Async external web search & local docs retrieval tests
 ```
 
 ---
@@ -129,7 +115,7 @@ mave/
 Always verify the codebase after any modification using Astral's tooling suite:
 
 ```bash
-# 1. Run all unit and integration tests (106 tests passing)
+# 1. Run all unit and integration tests (59 tests passing)
 uv run pytest
 
 # 2. Check static typing (Astral Ty)
