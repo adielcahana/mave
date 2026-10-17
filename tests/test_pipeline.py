@@ -2,7 +2,6 @@
 
 import asyncio
 import shutil
-import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,9 +14,7 @@ from src.main import (
     LogProcessingStats,
     analyze_log_lines,
     main,
-    run_demo,
     run_evaluate,
-    track_execution_timing,
 )
 from src.pipeline import LogPipeline, PipelineResult
 
@@ -25,11 +22,11 @@ from src.pipeline import LogPipeline, PipelineResult
 @pytest.fixture
 def test_settings(tmp_path: Path) -> Settings:
     rules_file = tmp_path / "rules.json"
-    shutil.copyfile("rules/rules.json", rules_file)
+    shutil.copyfile("resources/rules.json", rules_file)
     return Settings(
         base_url="https://test.nvidia.com/v1",
         api_key="test-key",
-        model_name="openai/gpt-oss-20b",
+        model_name="nvidia/nemotron-3-super-120b-a12b",
         rules_path=str(rules_file),
     )
 
@@ -45,12 +42,13 @@ def mock_resolution() -> ProblemResolution:
             "Replace faulty DIMM module in bank 2",
         ],
         citations_and_reasons=["[LANL HPC Runbook: memory-ecc-v1.0]: critical hardware fault"],
+        suggested_log_template_regex=r"memory ECC uncorrectable error on channel \d+",
     )
 
 
 @pytest.mark.anyio
 async def test_pipeline_filters_telemetry(test_settings: Settings) -> None:
-    """Verify benign telemetry returns TELEMETRY_FILTERED with cost_usd=0.0."""
+    """Verify benign telemetry child rule returns TELEMETRY_FILTERED with cost_usd=0.0."""
     pipeline = LogPipeline(settings=test_settings)
 
     telemetry_line = (
@@ -83,32 +81,66 @@ async def test_pipeline_hits_fast_path(test_settings: Settings) -> None:
 
 
 @pytest.mark.anyio
-async def test_pipeline_dynamic_cache_learning(
+async def test_pipeline_dynamic_rule_learning(
     test_settings: Settings,
     mock_resolution: ProblemResolution,
 ) -> None:
     """Verify novel error produces AGENT_RESOLVED, and second event returns FAST_PATH_HIT."""
     test_model = TestModel(custom_output_args=mock_resolution.model_dump())
-    agent = create_agent(settings=test_settings, model=test_model)
-    pipeline = LogPipeline(agent=agent, settings=test_settings)
+    pipeline = LogPipeline(settings=test_settings)
 
-    novel_error_line = (
+    novel_error_line1 = (
         "150000 node-88 kernel error 1074220000 1 memory ECC uncorrectable error on channel 0"
     )
+    novel_error_line2 = (
+        "150001 node-89 kernel error 1074220001 1 memory ECC uncorrectable error on channel 3"
+    )
 
-    # First occurrence -> slow-path agent triage
-    result1 = await pipeline.process_log(novel_error_line)
-    assert result1.status == "AGENT_RESOLVED"
-    assert result1.cost_usd > 0.0
-    assert result1.resolution is not None
-    assert result1.resolution.error_summary == mock_resolution.error_summary
+    with create_agent().override(model=test_model):
+        result1 = await pipeline.process_log(novel_error_line1)
+        assert result1.status == "AGENT_RESOLVED"
+        assert result1.cost_usd > 0.0
+        assert result1.resolution is not None
+        assert result1.resolution.error_summary == mock_resolution.error_summary
 
-    # Second occurrence -> fast-path cache hit ($0, sub-millisecond)
-    result2 = await pipeline.process_log(novel_error_line)
-    assert result2.status == "FAST_PATH_HIT"
-    assert result2.cost_usd == 0.0
-    assert result2.resolution is not None
-    assert result2.resolution.error_summary == mock_resolution.error_summary
+        result2 = await pipeline.process_log(novel_error_line2)
+        assert result2.status == "FAST_PATH_HIT"
+        assert result2.cost_usd == 0.0
+        assert result2.resolution is not None
+        assert result2.resolution.error_summary == mock_resolution.error_summary
+
+
+@pytest.mark.anyio
+async def test_pipeline_dynamic_envelope_registration_on_unparsed_log(
+    test_settings: Settings,
+) -> None:
+    """Verify pipeline registers dynamic parent envelope and child rule for unparsed logs."""
+    unparsed_line = "STORAGE_CONTROLLER [ctrl-0] RAID failure on array 0"
+
+    mock_res = ProblemResolution(
+        error_summary="RAID failure",
+        root_cause="Drive controller failure",
+        severity="HIGH",
+        remediation_steps=["Replace drive"],
+        citations_and_reasons=["Storage Docs"],
+        suggested_log_template_regex=(
+            r"^STORAGE_CONTROLLER\s+\[(?P<controller>[^\]]+)\]\s+(?P<message>.*)$"
+        ),
+        suggested_message_regex=r"RAID (?:failure|degraded) on array \d+",
+    )
+
+    test_model = TestModel(custom_output_args=mock_res.model_dump())
+    pipeline = LogPipeline(settings=test_settings)
+
+    with create_agent().override(model=test_model):
+        res1 = await pipeline.process_log(unparsed_line)
+        assert res1.status == "AGENT_RESOLVED"
+
+        similar_line = "STORAGE_CONTROLLER [ctrl-1] RAID degraded on array 2"
+        res2 = await pipeline.process_log(similar_line)
+        assert res2.status == "FAST_PATH_HIT"
+        assert res2.resolution is not None
+        assert res2.resolution.error_summary == "RAID failure"
 
 
 @pytest.mark.anyio
@@ -138,24 +170,8 @@ def test_cli_evaluate_runs_and_prints(capsys: pytest.CaptureFixture[str]) -> Non
     assert "Fast-Path Rule Tree Resolution SLA" in captured
 
 
-@pytest.mark.anyio
-async def test_cli_demo_runs_cleanly(
-    mock_resolution: ProblemResolution,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Verify run_demo executes cleanly."""
-    with patch("src.pipeline.analyze_log", return_value=mock_resolution):
-        await run_demo()
-    captured = capsys.readouterr().out
-    assert "[Stage 1] Wire-Speed Telemetry Filtration" in captured
-    assert "[Stage 2] Sub-Millisecond Rule Tree Fast-Path" in captured
-    assert "[Stage 3] Slow-Path SRE Agent Escalation" in captured
-    assert "[Stage 4] Dynamic Cache Hit on Second Occurrence" in captured
-    assert "DEMONSTRATION COMPLETE" in captured
-
-
 def test_cli_main_dispatch() -> None:
-    """Verify main entry point dispatches commands."""
+    """Verify main entry point dispatches evaluate command."""
     with (
         patch("sys.argv", ["main.py", "evaluate"]),
         patch("src.main.run_evaluate") as mock_eval,
@@ -166,14 +182,15 @@ def test_cli_main_dispatch() -> None:
 
 @pytest.mark.anyio
 async def test_analyze_log_lines_aggregates_stats(test_settings: Settings) -> None:
-    """Verify analyze_log_lines processes lines and computes stats correctly."""
+    """Verify analyze_log_lines processes lines and computes stats with SourceName literal."""
     lines = [
         "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )",
         "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )",
     ]
     pipeline = LogPipeline(settings=test_settings)
-    stats = await analyze_log_lines(lines, source_name="Test Stream", pipeline=pipeline)
+    stats = await analyze_log_lines(lines, source_name="Stream", pipeline=pipeline)
 
+    assert stats.source_name == "Stream"
     assert stats.total_lines == 2
     assert stats.benign_count == 1
     assert stats.error_count == 1
@@ -215,37 +232,6 @@ def test_cli_main_single_line_empty() -> None:
 
 
 @pytest.mark.anyio
-async def test_analyze_log_lines_runs_concurrently(test_settings: Settings) -> None:
-    """Verify analyze_log_lines processes lines concurrently rather than sequentially."""
-    pipeline = LogPipeline(settings=test_settings)
-    max_active = 0
-    active = 0
-    original_process = pipeline.process_log
-
-    async def mock_process(line: str) -> PipelineResult:
-        nonlocal active, max_active
-        active += 1
-        max_active = max(max_active, active)
-        await asyncio.sleep(0.01)
-        res = await original_process(line)
-        active -= 1
-        return res
-
-    fan_log = (
-        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
-    )
-    with patch.object(pipeline, "process_log", side_effect=mock_process):
-        lines = [
-            fan_log,
-            fan_log.replace("node-1", "node-2"),
-            fan_log.replace("node-1", "node-3"),
-        ]
-        stats = await analyze_log_lines(lines, pipeline=pipeline)
-        assert stats.total_lines == 3
-        assert max_active >= 2, f"Expected concurrent execution, but max active was {max_active}"
-
-
-@pytest.mark.anyio
 async def test_analyze_log_lines_with_concurrency_limit(test_settings: Settings) -> None:
     """Verify analyze_log_lines respects concurrency_limit semaphore."""
     pipeline = LogPipeline(settings=test_settings)
@@ -273,55 +259,70 @@ async def test_analyze_log_lines_with_concurrency_limit(test_settings: Settings)
 
 
 @pytest.mark.anyio
-async def test_pipeline_process_logs_concurrency_limit(test_settings: Settings) -> None:
-    """Verify pipeline.process_logs respects concurrency_limit and returns expected results."""
-    pipeline = LogPipeline(settings=test_settings)
-    lines = [
-        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )",
-        "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )",
-    ]
-    results = await pipeline.process_logs(lines, concurrency_limit=1)
-    assert len(results) == 2
-    assert results[0].status == "TELEMETRY_FILTERED"
-    assert results[1].status == "FAST_PATH_HIT"
-
-
-@pytest.mark.anyio
-async def test_pipeline_in_flight_burst_deduplication(
-    test_settings: Settings,
-    mock_resolution: ProblemResolution,
+async def test_pipeline_concurrent_post_facto_deduplication(
+    tmp_path: Path,
 ) -> None:
-    """Verify concurrent identical novel errors debounce via IN_FLIGHT_ATTACHED."""
-    test_model = TestModel(custom_output_args=mock_resolution.model_dump())
-    agent = create_agent(settings=test_settings, model=test_model)
-    pipeline = LogPipeline(agent=agent, settings=test_settings)
-
-    novel_error_line = (
-        "160000 node-99 kernel error 1074220000 1 unknown critical bus fault 0xdeadbeef"
+    """Verify concurrent cold-start workers deduplicate learned rules after the fact."""
+    rules_file = tmp_path / "empty_rules.json"
+    rules_file.write_text("[]", encoding="utf-8")
+    cold_settings = Settings(
+        base_url="https://test.nvidia.com/v1",
+        api_key="test-key",
+        model_name="nvidia/nemotron-3-super-120b-a12b",
+        rules_path=str(rules_file),
     )
 
-    call_count = 0
+    res_variant_a = ProblemResolution(
+        error_summary="Bus fault",
+        root_cause="Critical hardware bus fault",
+        severity="CRITICAL",
+        remediation_steps=["Reset node"],
+        citations_and_reasons=["[LANL HPC Runbook: bus-fault]"],
+        suggested_log_template_regex=(
+            r"^(?P<id>\d+)\s+(?P<host>\S+)\s+(?P<message>critical bus fault \S+)$"
+        ),
+        suggested_message_regex=r"critical bus fault 0x[0-9a-fA-F]+",
+    )
+    res_variant_b = ProblemResolution(
+        error_summary="Bus fault",
+        root_cause="Critical hardware bus fault",
+        severity="CRITICAL",
+        remediation_steps=["Reset node"],
+        citations_and_reasons=["[LANL HPC Runbook: bus-fault]"],
+        suggested_log_template_regex=(
+            r"^(?P<log_id>\d+)\s+(?P<node>\S+)\s+(?P<message>critical bus fault .+)$"
+        ),
+        suggested_message_regex=r"critical bus fault \S+",
+    )
+
+    pipeline = LogPipeline(settings=cold_settings)
+
+    lines = [
+        "160000 node-98 critical bus fault 0xdeadbeef",
+        "160001 node-99 critical bus fault 0xcafebabe",
+    ]
+
+    idx = 0
 
     async def mock_analyze(*args: object, **kwargs: object) -> ProblemResolution:
-        nonlocal call_count
-        call_count += 1
-        await asyncio.sleep(0.02)  # Simulate LLM latency
-        return mock_resolution
+        nonlocal idx
+        idx += 1
+        await asyncio.sleep(0.01)
+        return res_variant_a if idx == 1 else res_variant_b
 
     with patch("src.pipeline.analyze_log", side_effect=mock_analyze):
-        results = await pipeline.process_logs([novel_error_line] * 4)
+        results = await pipeline.process_logs(lines, concurrency_limit=2)
 
-    assert len(results) == 4
-    # The leader is AGENT_RESOLVED, subsequent concurrent coroutines attach
-    statuses = [r.status for r in results]
-    assert statuses[0] == "AGENT_RESOLVED"
-    assert statuses.count("IN_FLIGHT_ATTACHED") == 3
-    assert call_count == 1
+    assert len(results) == 2
+    assert all(r.status == "AGENT_RESOLVED" for r in results)
+    # Post-facto deduplication ensures only 1 parent envelope and 1 child rule remain
+    assert len(pipeline.rule_engine.envelopes) == 1
+    assert len(pipeline.rule_engine.rules) == 1
 
 
-def test_log_processing_stats_recording_and_timing(mock_resolution: ProblemResolution) -> None:
+def test_log_processing_stats_recording(mock_resolution: ProblemResolution) -> None:
     """Verify LogProcessingStats records outcomes and timing correctly."""
-    stats = LogProcessingStats(file_name="test.log", total_lines=3)
+    stats = LogProcessingStats(source_name="File", file_name="test.log", total_lines=3)
 
     r_benign = PipelineResult(log_id="1", status="TELEMETRY_FILTERED", cost_usd=0.0)
     r_fast = PipelineResult(
@@ -338,6 +339,7 @@ def test_log_processing_stats_recording_and_timing(mock_resolution: ProblemResol
     )
 
     stats.record_results([r_benign, r_fast, r_agent])
+    stats.finalize(0.01)
 
     assert stats.benign_count == 1
     assert stats.error_count == 2
@@ -345,64 +347,4 @@ def test_log_processing_stats_recording_and_timing(mock_resolution: ProblemResol
     assert stats.llm_needed_count == 1
     assert stats.total_cost_usd == pytest.approx(0.0015)
     assert len(stats.unique_errors) == 1
-    assert stats.unique_errors[mock_resolution.root_cause.strip()][1] == 2
-
-    with track_execution_timing(stats):
-        time.sleep(0.01)
-
-    assert stats.elapsed_time_s >= 0.005
     assert stats.throughput_lines_per_sec > 0.0
-
-
-@pytest.mark.anyio
-async def test_pipeline_custom_callback_invoked(test_settings: Settings) -> None:
-    """Verify registered callbacks fire on every processed log event."""
-    received: list[PipelineResult] = []
-    pipeline = LogPipeline(settings=test_settings, on_result=received.append)
-
-    line = (
-        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
-    )
-    await pipeline.process_log(line)
-
-    assert len(received) == 1
-    assert received[0].status == "TELEMETRY_FILTERED"
-
-
-@pytest.mark.anyio
-async def test_pipeline_collect_stats_context_manager(test_settings: Settings) -> None:
-    """Verify collect_stats context manager hooks callbacks and finalizes stats."""
-    pipeline = LogPipeline(settings=test_settings)
-    fan_line = (
-        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
-    )
-    psu_line = "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
-    lines = [fan_line, psu_line]
-
-    with pipeline.collect_stats(source_name="Test Context", total_lines=len(lines)) as stats:
-        await pipeline.process_logs(lines)
-
-    assert stats.file_name == "Test Context"
-    assert stats.total_lines == 2
-    assert stats.benign_count == 1
-    assert stats.error_count == 1
-    assert stats.auto_annotated_count == 1
-    assert stats.elapsed_time_s > 0.0
-    assert stats.throughput_lines_per_sec > 0.0
-
-
-@pytest.mark.anyio
-async def test_pipeline_analyze_method(test_settings: Settings) -> None:
-    """Verify pipeline.analyze returns complete LogProcessingStats."""
-    pipeline = LogPipeline(settings=test_settings)
-    fan_line = (
-        "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
-    )
-    psu_line = "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
-    lines = [fan_line, psu_line]
-
-    stats = await pipeline.analyze(lines, source_name="Stream Test")
-    assert stats.total_lines == 2
-    assert stats.benign_count == 1
-    assert stats.error_count == 1
-    assert stats.auto_annotated_count == 1

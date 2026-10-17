@@ -8,9 +8,6 @@ import json
 import os
 import re
 import sys
-import time
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 
 # Ensure repository root is on sys.path for direct script execution (`python src/main.py`)
@@ -31,20 +28,10 @@ from rich.table import Table
 from rich.text import Text
 
 from src.evaluation import evaluate_benchmark
-from src.pipeline import LogPipeline, LogProcessingStats
+from src.pipeline import LogPipeline, LogProcessingStats, SourceName
 from src.rules.engine import RuleTreeEngine
 
 console = Console()
-
-
-@contextmanager
-def track_execution_timing(stats: LogProcessingStats) -> Generator[None, None, None]:
-    """Context manager to measure execution latency and throughput on stats."""
-    start = time.perf_counter()
-    try:
-        yield
-    finally:
-        stats.finalize(time.perf_counter() - start)
 
 
 def _format_severity_badge(severity: str) -> Text:
@@ -63,7 +50,7 @@ def _format_severity_badge(severity: str) -> Text:
 
 def _format_tier_badge(status: str) -> Text:
     """Format a routing tier badge (Fast-Path vs SRE Agent LLM)."""
-    if status in ("FAST_PATH_HIT", "IN_FLIGHT_ATTACHED"):
+    if status == "FAST_PATH_HIT":
         return Text(" FAST-PATH (AUTOMATED) ", style="bold white on green")
     elif status == "AGENT_RESOLVED":
         return Text(" SRE AGENT (LLM) ", style="bold white on magenta")
@@ -136,9 +123,10 @@ def load_log_lines(file_path: str | Path, limit: int | None = None) -> list[str]
 
 async def analyze_log_lines(
     raw_lines: list[str],
-    source_name: str = "Stream",
+    source_name: SourceName = "Stream",
     pipeline: LogPipeline | None = None,
     concurrency_limit: int | None = 5,
+    file_name: str = "",
 ) -> LogProcessingStats:
     """Analyze a list of log lines concurrently via asyncio and return stats and remedies."""
     pipe = pipeline or LogPipeline()
@@ -146,6 +134,7 @@ async def analyze_log_lines(
         raw_lines,
         source_name=source_name,
         concurrency_limit=concurrency_limit,
+        file_name=file_name,
     )
 
 
@@ -160,9 +149,10 @@ async def analyze_log_file(
     raw_lines = load_log_lines(path, limit=limit)
     return await analyze_log_lines(
         raw_lines,
-        source_name=path.name,
+        source_name="File",
         pipeline=pipeline,
         concurrency_limit=concurrency_limit,
+        file_name=path.name,
     )
 
 
@@ -373,15 +363,6 @@ def run_evaluate(benchmark_path: str = "data/golden_eval.json") -> None:
     print(f"Slow-Path Volume: {metrics.agent_fallbacks} ({fall_pct:.1f}%)")
 
 
-async def run_demo() -> None:
-    """Run stream demo for test backwards compatibility."""
-    print("[Stage 1] Wire-Speed Telemetry Filtration")
-    print("[Stage 2] Sub-Millisecond Rule Tree Fast-Path")
-    print("[Stage 3] Slow-Path SRE Agent Escalation")
-    print("[Stage 4] Dynamic Cache Hit on Second Occurrence")
-    print("DEMONSTRATION COMPLETE")
-
-
 def main() -> None:
     """CLI entry point accepting a log file or single log line and returning stats and remedies."""
     parser = argparse.ArgumentParser(
@@ -427,21 +408,11 @@ def main() -> None:
         action="store_true",
         help="Run golden evaluation benchmark breakdown",
     )
-    parser.add_argument(
-        "--demo",
-        action="store_true",
-        help="Run interactive demo stages",
-    )
 
     args = parser.parse_args()
 
-    # Backwards compatibility dispatch for tests
     if args.evaluate or (args.log_file and args.log_file in ("evaluate", "eval")):
         run_evaluate("data/golden_eval.json")
-        return
-
-    if args.demo or (args.log_file and args.log_file == "demo"):
-        asyncio.run(run_demo())
         return
 
     if args.log_line is not None:

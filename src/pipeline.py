@@ -1,7 +1,7 @@
 """Two-tier pipeline orchestrator for HPC log processing.
 
-Integrates wire-speed telemetry filtration, sub-millisecond Rule Tree matching,
-and SRE agent fallback with dynamic caching.
+Integrates single-pass Regex Tree (Parent Envelope -> Child Message Rules) for wire-speed
+benign telemetry filtration and fast-path resolution, with SRE agent fallback and dynamic learning.
 """
 
 import asyncio
@@ -12,29 +12,28 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
 
-from src.agent import _resolve_settings, analyze_log, create_agent
-from src.config import Settings
+from src.agent import analyze_log
+from src.config import Settings, get_settings
 from src.knowledge.docs_db import create_runbook_from_resolution
-from src.rules.engine import RuleTreeEngine, extract_template
+from src.rules.engine import RuleTreeEngine
 from src.rules.models import LogEvent, ProblemResolution
-from src.rules.telemetry_filter import TelemetryFilter
-from src.rules.template_registry import LogTemplateRegistry
 
 __all__ = [
     "LogPipeline",
     "LogProcessingStats",
     "PipelineResult",
     "PipelineStatus",
+    "SourceName",
 ]
 
 PipelineStatus = Literal[
     "TELEMETRY_FILTERED",
     "FAST_PATH_HIT",
-    "IN_FLIGHT_ATTACHED",
     "AGENT_RESOLVED",
 ]
+
+SourceName = Literal["Stream", "CLI Input", "File"]
 
 
 class PipelineResult(BaseModel):
@@ -60,6 +59,7 @@ class PipelineResult(BaseModel):
 class LogProcessingStats:
     """Quantitative stats and remedy recommendations for a processed log stream."""
 
+    source_name: SourceName = "Stream"
     file_name: str = ""
     total_lines: int = 0
     benign_count: int = 0
@@ -71,6 +71,10 @@ class LogProcessingStats:
     throughput_lines_per_sec: float = 0.0
     unique_errors: dict[str, tuple[PipelineResult, int]] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if not self.file_name:
+            self.file_name = self.source_name
+
     def record_result(self, result: PipelineResult) -> None:
         """Accumulate counts, costs, and deduplicated errors from a pipeline result."""
         self.total_cost_usd += result.cost_usd
@@ -80,7 +84,7 @@ class LogProcessingStats:
             return
 
         self.error_count += 1
-        if result.status in ("FAST_PATH_HIT", "IN_FLIGHT_ATTACHED"):
+        if result.status == "FAST_PATH_HIT":
             self.auto_annotated_count += 1
         elif result.status == "AGENT_RESOLVED":
             self.llm_needed_count += 1
@@ -107,40 +111,26 @@ class LogProcessingStats:
 
 
 class LogPipeline:
-    """Two-tier stream pipeline orchestrating filtration, fast-path, and SRE triage."""
+    """Two-tier stream pipeline orchestrating Regex Tree matching and SRE agent triage."""
 
     def __init__(
         self,
         rule_engine: RuleTreeEngine | None = None,
-        agent: Agent[Settings, ProblemResolution] | None = None,
         settings: Settings | None = None,
         agent_cost_usd: float = 0.0015,
-        template_registry: LogTemplateRegistry | None = None,
         on_result: Callable[[PipelineResult], Any] | None = None,
         persist_runbooks: bool = False,
         concurrency_limit: int | None = 5,
     ) -> None:
-        self.settings: Settings = _resolve_settings(settings)
+        self.settings: Settings = settings or get_settings()
         self.rule_engine: RuleTreeEngine = (
             rule_engine
             if rule_engine is not None
             else RuleTreeEngine.with_defaults(rules_path=self.settings.rules_path)
         )
-        self.agent: Agent[Settings, ProblemResolution] = (
-            agent if agent is not None else create_agent(settings=self.settings)
-        )
         self.agent_cost_usd: float = agent_cost_usd
-        self.template_registry: LogTemplateRegistry = (
-            template_registry if template_registry is not None else LogTemplateRegistry()
-        )
         self.persist_runbooks: bool = persist_runbooks
         self.concurrency_limit: int | None = concurrency_limit
-        self._llm_semaphore: asyncio.Semaphore | None = (
-            asyncio.Semaphore(concurrency_limit)
-            if concurrency_limit and concurrency_limit > 0
-            else None
-        )
-        self._in_flight: dict[str, asyncio.Future[ProblemResolution]] = {}
         self._callbacks: list[Callable[[PipelineResult], Any]] = []
         if on_result is not None:
             self._callbacks.append(on_result)
@@ -167,11 +157,16 @@ class LogPipeline:
     @contextmanager
     def collect_stats(
         self,
-        source_name: str = "Stream",
+        source_name: SourceName = "Stream",
         total_lines: int = 0,
+        file_name: str = "",
     ) -> Generator[LogProcessingStats, None, None]:
         """Context manager to record pipeline metrics in real-time via callbacks."""
-        stats = LogProcessingStats(file_name=source_name, total_lines=total_lines)
+        stats = LogProcessingStats(
+            source_name=source_name,
+            file_name=file_name or source_name,
+            total_lines=total_lines,
+        )
         self.add_callback(stats.record_result)
         start_time = time.perf_counter()
         try:
@@ -183,159 +178,109 @@ class LogPipeline:
     async def analyze(
         self,
         raw_lines: list[str],
-        source_name: str = "Stream",
+        source_name: SourceName = "Stream",
         concurrency_limit: int | None = 5,
+        file_name: str = "",
     ) -> LogProcessingStats:
         """Analyze a list of log lines concurrently, collecting stats via pipeline callbacks."""
-        with self.collect_stats(source_name=source_name, total_lines=len(raw_lines)) as stats:
+        with self.collect_stats(
+            source_name=source_name,
+            total_lines=len(raw_lines),
+            file_name=file_name,
+        ) as stats:
             await self.process_logs(raw_lines, concurrency_limit=concurrency_limit)
         return stats
 
-    def _get_dedup_key(self, event: LogEvent) -> str:
-        """Derive canonical deduplication key from event subsystem and message template."""
-        subsys = event.subsystem.strip().lower()
-        template = extract_template(event.message)
-        return f"{subsys}:{template}" if subsys else template
-
-    async def process_log(self, raw_line: str) -> PipelineResult:
-        """Process a single raw HPC log line through the two-tier pipeline.
-
-        1. Parses raw line via LogTemplateRegistry (combined regex disjunction or fallback).
-        2. Filters routine benign telemetry at wire speed (<0.1ms, $0 cost).
-        3. Matches against pre-configured and dynamically learned rules (<0.5ms, $0 cost).
-        4. Deduplicates concurrent in-flight novel error bursts ($0 cost).
-        5. Dispatches unresolved novel errors to the SRE Agent for grounded diagnosis.
-        6. Dynamically caches resolutions into RuleTreeEngine and registers new templates.
-        """
-        start = time.perf_counter()
-
-        # Step 1: Match raw line against Regex Tree (Parent Envelope -> Child Rule)
-        event, matched_rule = self.rule_engine.match_raw(raw_line)
-
-        # Step 2: Wire-speed routine telemetry filtration
+    def _match_fast_path(
+        self,
+        event: LogEvent,
+        matched_rule: Any,
+        start: float,
+    ) -> PipelineResult | None:
+        """Return a fast-path or telemetry-filtered PipelineResult if matched_rule applies."""
+        log_id = str(event.get("log_id", ""))
         if matched_rule is not None and matched_rule.rule_type == "BENIGN_TELEMETRY":
             latency_ms = (time.perf_counter() - start) * 1000.0
             return self._notify_result(
                 PipelineResult(
-                    log_id=event.log_id,
+                    log_id=log_id,
                     status="TELEMETRY_FILTERED",
                     resolution=None,
                     cost_usd=0.0,
                     latency_ms=latency_ms,
                 )
             )
-
-        if TelemetryFilter.is_routine_telemetry(event):
-            latency_ms = (time.perf_counter() - start) * 1000.0
-            return self._notify_result(
-                PipelineResult(
-                    log_id=event.log_id,
-                    status="TELEMETRY_FILTERED",
-                    resolution=None,
-                    cost_usd=0.0,
-                    latency_ms=latency_ms,
-                )
-            )
-
-        # Step 3: Fast-path rule matching from Regex Tree
         if matched_rule is not None and matched_rule.resolution is not None:
             latency_ms = (time.perf_counter() - start) * 1000.0
             return self._notify_result(
                 PipelineResult(
-                    log_id=event.log_id,
+                    log_id=log_id,
                     status="FAST_PATH_HIT",
                     resolution=matched_rule.resolution,
                     cost_usd=0.0,
                     latency_ms=latency_ms,
                 )
             )
+        return None
 
-        # Fallback check on match(event)
-        matched_resolution = self.rule_engine.match(event)
-        if matched_resolution is not None:
-            latency_ms = (time.perf_counter() - start) * 1000.0
-            return self._notify_result(
-                PipelineResult(
-                    log_id=event.log_id,
-                    status="FAST_PATH_HIT",
-                    resolution=matched_resolution,
-                    cost_usd=0.0,
-                    latency_ms=latency_ms,
-                )
-            )
-
-        # Step 4: In-flight burst deduplication
-        dedup_key = self._get_dedup_key(event)
-        if dedup_key in self._in_flight:
-            fut = self._in_flight[dedup_key]
-            try:
-                attached_resolution = await fut
-                latency_ms = (time.perf_counter() - start) * 1000.0
-                return self._notify_result(
-                    PipelineResult(
-                        log_id=event.log_id,
-                        status="IN_FLIGHT_ATTACHED",
-                        resolution=attached_resolution,
-                        cost_usd=0.0,
-                        latency_ms=latency_ms,
-                    )
-                )
-            except Exception:
-                pass
-
-        loop = asyncio.get_running_loop()
-        leader_future: asyncio.Future[ProblemResolution] = loop.create_future()
-        self._in_flight[dedup_key] = leader_future
-
-        try:
-            # Step 5: Slow-path SRE agent escalation
-            resolution = await analyze_log(
-                event,
-                agent=self.agent,
-                settings=self.settings,
-                known_groups=self.template_registry.get_known_groups_info(),
-            )
-
-            # If unparsed and returned a regex resolution, register new template immediately
-            if event.is_unparsed and bool(resolution.suggested_log_template_regex):
-                new_tmpl_id = f"DYNAMIC_{event.subsystem or 'UNPARSED'}_{int(time.time() * 1000)}"
-                self.template_registry.register_template(
-                    template_id=new_tmpl_id,
-                    regex=resolution.suggested_log_template_regex,
-                    format_string=resolution.format_string,
-                    sample_raw_log=event.raw,
-                    persist=False,
-                )
-
-            # Step 6: Dynamic rule creation into RuleTreeEngine for subsequent instant hits
-            self.rule_engine.create_rule_from_resolution(event, resolution)
-
-            # Step 7: Dynamic runbook synthesis and learning into cluster knowledge base
+    async def _escalate_and_learn(
+        self,
+        event: LogEvent,
+        start: float,
+    ) -> tuple[ProblemResolution, PipelineResult]:
+        """Escalate event to the SRE Agent, register/dedup learned rules, and build result."""
+        log_id = str(event.get("log_id", ""))
+        resolution = await analyze_log(
+            event,
+            known_groups=self.rule_engine.get_known_groups_info(),
+        )
+        self.rule_engine.create_rule_from_resolution(event, resolution)
+        if not resolution.is_benign:
             create_runbook_from_resolution(
                 event,
                 resolution,
                 persist=self.persist_runbooks,
             )
-
-            if not leader_future.done():
-                leader_future.set_result(resolution)
-
-            latency_ms = (time.perf_counter() - start) * 1000.0
-            return self._notify_result(
+        latency_ms = (time.perf_counter() - start) * 1000.0
+        if resolution.is_benign:
+            res = self._notify_result(
                 PipelineResult(
-                    log_id=event.log_id,
+                    log_id=log_id,
+                    status="TELEMETRY_FILTERED",
+                    resolution=None,
+                    cost_usd=self.agent_cost_usd,
+                    latency_ms=latency_ms,
+                )
+            )
+        else:
+            res = self._notify_result(
+                PipelineResult(
+                    log_id=log_id,
                     status="AGENT_RESOLVED",
                     resolution=resolution,
                     cost_usd=self.agent_cost_usd,
                     latency_ms=latency_ms,
                 )
             )
-        except BaseException as exc:
-            if not leader_future.done():
-                leader_future.set_exception(exc)
-            raise
-        finally:
-            self._in_flight.pop(dedup_key, None)
+        return resolution, res
+
+    async def process_log(self, raw_line: str) -> PipelineResult:
+        """Process a single raw HPC log line through the two-tier Regex Tree pipeline.
+
+        1. Matches raw line against the Regex Tree (Parent Envelope -> Child Rule).
+        2. Filters benign telemetry child rules at wire speed (<0.1ms, $0 cost).
+        3. Resolves actionable error child rules via fast-path (<0.1ms, $0 cost).
+        4. Escalates novel logs to the SRE Agent and registers/deduplicates parent/child rules.
+        """
+        start = time.perf_counter()
+
+        event, matched_rule = self.rule_engine.match(raw_line)
+        fast_res = self._match_fast_path(event, matched_rule, start)
+        if fast_res is not None:
+            return fast_res
+
+        _, result = await self._escalate_and_learn(event, start)
+        return result
 
     async def process_logs(
         self,
