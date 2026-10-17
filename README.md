@@ -171,8 +171,8 @@ mave/
 ├── README.md             # Setup, quickstart, CLI commands, and architecture overview
 ├── pyproject.toml        # Dependencies, tool configurations (Ruff, Ty, Pytest)
 ├── resources/
-│   ├── rules.json        # Hierarchical Regex Tree (ParentEnvelope & Child Rules)
-│   └── runbooks.json     # Curated cluster failure recovery runbooks
+│   ├── rules.json        # Dynamic Regex Tree registry (clean initial state)
+│   └── runbooks.json     # Dynamic failure recovery runbook registry (clean initial state)
 ├── data/
 │   ├── HPC.log           # 433,490-line LANL System 20 HPC dataset
 │   ├── golden_eval.json  # 150-scenario curated evaluation benchmark
@@ -194,6 +194,7 @@ mave/
 │       ├── engine.py     # Unified RuleTreeEngine & dynamic template cache
 │       └── models.py     # Strongly-typed schemas (LogEvent, Rule, ProblemResolution)
 └── tests/
+    ├── fixtures/            # Mock verification rules and runbook fixtures for test suites
     ├── test_agent.py        # SRE agent tool-calling, grounding, and fallback tests
     ├── test_docs_db.py      # Knowledge base query and search tests
     ├── test_evaluation.py   # Golden evaluation and metrics tests

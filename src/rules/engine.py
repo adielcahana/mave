@@ -477,6 +477,7 @@ class RuleTreeEngine:
         auto_validate_async: bool = True,
         parent_id: str | None = None,
         runbook_id: str | None = None,
+        persist: bool = True,
     ) -> Rule:
         """Synthesize and deduplicate ParentEnvelope and Child Rule from an agent resolution."""
         if isinstance(event, str):
@@ -640,7 +641,7 @@ class RuleTreeEngine:
             env.children = retained_children
 
         self._rule_samples[rule.rule_id] = msg
-        self.add_rule(target_parent_id, rule, persist=True)
+        self.add_rule(target_parent_id, rule, persist=persist)
 
         if auto_validate_async:
             try:

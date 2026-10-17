@@ -19,10 +19,14 @@ def golden_eval_path() -> Path:
     return Path("data/golden_eval.json")
 
 
-def test_evaluation_benchmark_executes(golden_eval_path: Path):
+@pytest.fixture
+def mock_rule_engine() -> RuleTreeEngine:
+    return RuleTreeEngine.with_defaults(rules_path="tests/fixtures/rules.json")
+
+
+def test_evaluation_benchmark_executes(golden_eval_path: Path, mock_rule_engine: RuleTreeEngine):
     """Verify running benchmark on data/golden_eval.json returns valid metrics with total == 150."""
-    engine = RuleTreeEngine.with_defaults()
-    metrics = evaluate_benchmark(golden_eval_path, engine)
+    metrics = evaluate_benchmark(golden_eval_path, mock_rule_engine)
 
     assert isinstance(metrics, BenchmarkMetrics)
     assert metrics.total == 150
@@ -85,16 +89,18 @@ def test_golden_dataset_structure(golden_eval_path: Path):
     assert abs(actionable_count - non_actionable_count) <= 20
 
 
-def test_telemetry_invariance_in_evaluation(golden_eval_path: Path):
+def test_telemetry_invariance_in_evaluation(
+    golden_eval_path: Path, mock_rule_engine: RuleTreeEngine
+):
     """Verify zero false positives on normal cluster telemetry (ambient=*, normal, Link ok)."""
-    metrics = evaluate_benchmark(golden_eval_path)
+    metrics = evaluate_benchmark(golden_eval_path, mock_rule_engine)
     assert metrics.false_positives == 0, f"False positives: {metrics.false_positives}"
     assert metrics.precision == 1.0
 
 
-def test_format_metrics_table_and_summary(golden_eval_path: Path):
+def test_format_metrics_table_and_summary(golden_eval_path: Path, mock_rule_engine: RuleTreeEngine):
     """Verify pretty text table formatters work cleanly."""
-    metrics = evaluate_benchmark(golden_eval_path)
+    metrics = evaluate_benchmark(golden_eval_path, mock_rule_engine)
     table = format_metrics_table(metrics)
     summary = format_benchmark_summary(metrics)
 
@@ -104,9 +110,11 @@ def test_format_metrics_table_and_summary(golden_eval_path: Path):
     assert len(summary) > 0
 
 
-def test_evaluate_benchmark_string_path_and_default_engine(golden_eval_path: Path):
+def test_evaluate_benchmark_string_path_and_default_engine(
+    golden_eval_path: Path, mock_rule_engine: RuleTreeEngine
+):
     """Verify evaluate_benchmark works with str path and creates default engine when None."""
-    metrics = evaluate_benchmark(str(golden_eval_path), rule_engine=None)
+    metrics = evaluate_benchmark(str(golden_eval_path), rule_engine=mock_rule_engine)
     assert metrics.total == 150
     assert metrics.fast_path_hits > 0
 

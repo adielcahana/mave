@@ -36,7 +36,7 @@ os.environ["PYDANTIC_AI_NO_BANNER"] = "1"
 if sys.platform == "win32" and isinstance(sys.stdout, io.TextIOWrapper):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from src.evaluation import BenchmarkMetrics, evaluate_benchmark  # noqa: E402
+from src.evaluation import BenchmarkMetrics  # noqa: E402
 from src.pipeline import (  # noqa: E402
     LogPipeline,
     LogProcessingStats,
@@ -641,8 +641,13 @@ def render_evaluation_dashboard(
     console.print()
 
 
-def run_evaluate(benchmark_path: str = "data/golden_eval.json") -> None:
-    """Run benchmark evaluation and render in rich TUI style."""
+def run_evaluate(
+    benchmark_path: str = "data/golden_eval.json",
+    scratch: bool = False,
+    limit: int | None = None,
+    concurrency_limit: int = 5,
+) -> None:
+    """Run live benchmark evaluation with LLM fallback and render dashboard in-memory."""
     path = Path(benchmark_path)
     if not path.is_file():
         console.print(
@@ -654,10 +659,50 @@ def run_evaluate(benchmark_path: str = "data/golden_eval.json") -> None:
         )
         sys.exit(1)
 
-    render_header(subtitle=f"Golden Benchmark Evaluation • {path.name}")
+    mode_desc = "from scratch (cold rule tree)" if scratch else "with existing rules & runbooks"
+    subtitle = f"Live Evaluation Benchmark • {path.name} • {mode_desc}"
+    render_header(subtitle=subtitle)
 
-    rule_engine = RuleTreeEngine.with_defaults(rules_path=None)
-    metrics = evaluate_benchmark(path, rule_engine=rule_engine)
+    # Build engine: scratch starts completely empty, otherwise load existing baseline rules
+    if scratch:
+        rule_engine = RuleTreeEngine(rules_path=None)
+    else:
+        rule_engine = RuleTreeEngine.with_defaults(rules_path=None)
+
+    # Initialize live pipeline strictly in-memory (persist_rules=False, persist_runbooks=False)
+    pipeline = LogPipeline(
+        rule_engine=rule_engine,
+        persist_runbooks=False,
+        persist_rules=False,
+        concurrency_limit=concurrency_limit,
+    )
+
+    stats = asyncio.run(
+        analyze_log_file(
+            path,
+            limit=limit,
+            pipeline=pipeline,
+            concurrency_limit=concurrency_limit,
+            show_progress=True,
+        )
+    )
+
+    # Convert live pipeline execution stats into benchmark metrics for dashboard
+    fast_hits = max(stats.fast_lane_count - stats.benign_count, 0)
+    metrics = BenchmarkMetrics(
+        total=stats.total_lines,
+        precision=stats.precision,
+        recall=stats.recall,
+        f1=stats.f1,
+        accuracy=stats.accuracy,
+        telemetry_filtered=stats.benign_count,
+        fast_path_hits=fast_hits,
+        agent_fallbacks=stats.llm_lane_count,
+        false_positives=stats.false_positives,
+        false_negatives=stats.false_negatives,
+        true_positives=stats.true_positives,
+        true_negatives=stats.true_negatives,
+    )
 
     render_evaluation_dashboard(metrics, benchmark_name=path.name)
 
@@ -705,7 +750,13 @@ def main() -> None:
         "--eval",
         dest="evaluate",
         action="store_true",
-        help="Run golden evaluation benchmark breakdown",
+        help="Run live evaluation benchmark breakdown",
+    )
+    parser.add_argument(
+        "--scratch",
+        dest="scratch",
+        action="store_true",
+        help="Run evaluation from scratch with an empty rule tree (in-memory, no disk mutation)",
     )
 
     args = parser.parse_args()
@@ -716,7 +767,12 @@ def main() -> None:
             or (args.log_file if args.log_file not in ("evaluate", "eval") else None)
             or "data/golden_eval.json"
         )
-        run_evaluate(benchmark_file)
+        run_evaluate(
+            benchmark_file,
+            scratch=args.scratch,
+            limit=args.limit,
+            concurrency_limit=args.concurrency,
+        )
         return
 
     if args.log_line is not None:

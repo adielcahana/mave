@@ -81,8 +81,8 @@ mave/
 │   ├── README.md         # Benchmark citation details
 │   └── splits/           # Train/Val/Test partitions (generated, gitignored)
 ├── resources/
-│   ├── rules.json        # Hierarchical Regex Tree (ParentEnvelope & Child Rules)
-│   └── runbooks.json     # Failure recovery runbooks
+│   ├── rules.json        # Dynamic Regex Tree registry (clean initial state)
+│   └── runbooks.json     # Dynamic failure recovery runbook registry (clean initial state)
 ├── src/
 │   ├── __init__.py
 │   ├── agent.py          # Pydantic-AI SRE agent & output validator
@@ -100,6 +100,7 @@ mave/
 │       ├── engine.py     # Unified RuleTreeEngine (ParentEnvelope -> Child Rule)
 │       └── models.py     # Generic key-value LogEvent & Regex Tree domain models
 └── tests/
+    ├── fixtures/           # Mock verification rules and runbook fixtures for test suites
     ├── test_agent.py       # SRE agent tool-calling & regex output validation tests
     ├── test_docs_db.py     # Knowledge base lookup & search tests
     ├── test_evaluation.py  # Benchmark metrics & scoring tests

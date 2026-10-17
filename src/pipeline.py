@@ -178,6 +178,7 @@ class LogPipeline:
         settings: Settings | None = None,
         on_result: Callable[[PipelineResult], Any] | None = None,
         persist_runbooks: bool = False,
+        persist_rules: bool = False,
         concurrency_limit: int | None = 5,
     ) -> None:
         self.settings: Settings = settings or get_settings()
@@ -187,6 +188,7 @@ class LogPipeline:
             else RuleTreeEngine.with_defaults(rules_path=self.settings.rules_path)
         )
         self.persist_runbooks: bool = persist_runbooks
+        self.persist_rules: bool = persist_rules
         self.concurrency_limit: int | None = concurrency_limit
         self.active_llm_count: int = 0
         self._active_stats: list[LogProcessingStats] = []
@@ -327,6 +329,7 @@ class LogPipeline:
                 event,
                 resolution,
                 runbook_id=runbook_id,
+                persist=self.persist_rules,
             )
         finally:
             self.active_llm_count = max(self.active_llm_count - 1, 0)

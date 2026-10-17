@@ -9,14 +9,13 @@ from src.knowledge.docs_db import (
     RunbookEntry,
     add_runbook_entry,
     create_runbook_from_resolution,
-    get_all_runbooks,
     load_runbooks,
 )
 from src.rules.models import LogEvent, ProblemResolution
 
 
 def test_citations_present_on_all_runbook_entries() -> None:
-    entries = get_all_runbooks()
+    entries = load_runbooks("tests/fixtures/runbooks.json")
     assert len(entries) >= 15
     for entry in entries:
         assert isinstance(entry, RunbookEntry)
@@ -47,10 +46,15 @@ def test_runbooks_json_file_exists_and_loads() -> None:
 
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
-
     assert isinstance(data, list)
-    assert len(data) >= 15
-    for item in data:
+
+    fixture_path = Path("tests/fixtures/runbooks.json")
+    with open(fixture_path, encoding="utf-8") as f:
+        fixture_data = json.load(f)
+
+    assert isinstance(fixture_data, list)
+    assert len(fixture_data) >= 15
+    for item in fixture_data:
         for required_field in (
             "scenario",
             "root_cause",

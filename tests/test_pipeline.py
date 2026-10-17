@@ -23,8 +23,8 @@ from src.pipeline import LogPipeline, PipelineResult
 def test_settings(tmp_path: Path) -> Settings:
     rules_file = tmp_path / "rules.json"
     runbooks_file = tmp_path / "runbooks.json"
-    shutil.copyfile("resources/rules.json", rules_file)
-    shutil.copyfile("resources/runbooks.json", runbooks_file)
+    shutil.copyfile("tests/fixtures/rules.json", rules_file)
+    shutil.copyfile("tests/fixtures/runbooks.json", runbooks_file)
     return Settings(
         base_url="https://test.nvidia.com/v1",
         api_key="test-key",
@@ -163,7 +163,28 @@ async def test_pipeline_process_logs(test_settings: Settings) -> None:
 
 def test_cli_evaluate_runs_and_prints(capsys: pytest.CaptureFixture[str]) -> None:
     """Verify run_evaluate prints metrics table and SLA breakdown."""
-    run_evaluate("data/golden_eval.json")
+    fake_stats = LogProcessingStats(
+        source_name="File",
+        file_name="golden_eval.json",
+        total_lines=150,
+        processed_count=150,
+        fast_lane_count=117,
+        llm_lane_count=33,
+        benign_count=75,
+        error_count=75,
+        auto_annotated_count=42,
+        llm_needed_count=33,
+        true_positives=75,
+        true_negatives=75,
+        false_positives=0,
+        false_negatives=0,
+        has_ground_truth=True,
+    )
+    with (
+        patch("src.main.LogPipeline"),
+        patch("src.main.analyze_log_file", return_value=fake_stats),
+    ):
+        run_evaluate("data/golden_eval.json")
     captured = capsys.readouterr().out
     assert "HPC Golden Evaluation Metrics" in captured
     assert "HPC OPERATIONAL SLA BREAKDOWN" in captured
@@ -203,22 +224,32 @@ async def test_analyze_log_lines_aggregates_stats(test_settings: Settings) -> No
     assert len(stats.unique_errors) == 1
 
 
-def test_cli_main_single_line_telemetry(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_main_single_line_telemetry(
+    capsys: pytest.CaptureFixture[str], test_settings: Settings
+) -> None:
     """Verify main() handles a single benign telemetry line via --line."""
     line = (
         "10000 node-1 switch_module fan 1074220000 1 Fan speeds ( 3552 3534 3375 3500 3515 3479 )"
     )
-    with patch("sys.argv", ["main.py", "--line", line]):
+    with (
+        patch("src.pipeline.get_settings", return_value=test_settings),
+        patch("sys.argv", ["main.py", "--line", line]),
+    ):
         main()
     captured = capsys.readouterr().out
     assert "Input Log Line" in captured
     assert "Benign Telemetry" in captured
 
 
-def test_cli_main_single_line_short_flag(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_main_single_line_short_flag(
+    capsys: pytest.CaptureFixture[str], test_settings: Settings
+) -> None:
     """Verify main() handles a single error log line via -l."""
     line = "130000 Interconnect-1T00 switch_module psu 1074220000 1 PSU status ( off on )"
-    with patch("sys.argv", ["main.py", "-l", line]):
+    with (
+        patch("src.pipeline.get_settings", return_value=test_settings),
+        patch("sys.argv", ["main.py", "-l", line]),
+    ):
         main()
     captured = capsys.readouterr().out
     assert "Input Log Line" in captured
@@ -271,7 +302,7 @@ async def test_pipeline_concurrent_post_facto_deduplication(
     rules_file = tmp_path / "empty_rules.json"
     runbooks_file = tmp_path / "runbooks.json"
     rules_file.write_text("[]", encoding="utf-8")
-    shutil.copyfile("resources/runbooks.json", runbooks_file)
+    shutil.copyfile("tests/fixtures/runbooks.json", runbooks_file)
     cold_settings = Settings(
         base_url="https://test.nvidia.com/v1",
         api_key="test-key",
