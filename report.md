@@ -219,11 +219,16 @@ Evaluation was executed across our 150-scenario golden evaluation benchmark (`da
    - *Proposed Enhancement:* Close the feedback loop with physical infrastructure by deploying an offline Post-Mortem Curation Agent that correlates generated rules and runbooks against telemetry and outcomes from the *actual physical faulty compute nodes* (e.g., IPMI/BMC hardware logs, Slurm node recovery states, and hardware repair work-orders).
    - *Operational Impact:* Verifies whether prescribed remediations genuinely restored faulty nodes or if kernel panics recurred post-remediation. Rules and runbooks are promoted to persistent production registries only after empirical validation against real-world compute recovery outcomes.
 
-5. **Dense Semantic Vector Embeddings for Runbook Retrieval:**
+5. **Temporal Sliding-Window Telemetry Tracking & Preemptive Failure Escalation:**
+   - *Operational Challenge:* In high-density supercomputers, critical hardware failures are rarely instantaneous; they are preceded by progressive degradation in otherwise "benign" telemetry (e.g., cooling fan speeds dropping incrementally from 3,500 to 2,000 RPM, switch temperatures climbing $+1.5^\circ\text{C}/\text{hour}$, correctable single-bit ECC frequencies creeping upward, or optical link symbol error counts accumulating on InfiniBand HCAs). Treating these lines as purely benign status pings misses the crucial window for zero-downtime preventative intervention.
+   - *Proposed Enhancement:* Implement a stateful, streaming time-series accumulator (e.g., Exponential Weighted Moving Average [EWMA] and rolling Z-score over 15-to-60-minute sliding windows) integrated directly into the Tier 1 envelope parser. Numeric metric slots (`temperature`, `fan_rpm`, `ecc_count`, `symbol_errors`) continuously update in-memory per-node and per-switch state vectors without incurring token cost.
+   - *Preemptive Action:* When rate-of-change thresholds ($\Delta\text{metric}/\Delta t$) or statistical anomalies are detected, the pipeline preemptively synthesizes an actionable warning (`PREEMPTIVE_DEGRADATION`). The SRE agent can then recommend or trigger non-disruptive remediation (e.g., Slurm job re-routing and node drain via `scontrol update NodeName=... State=DRAIN`) *before* an uncorrectable multi-bit ECC panic or thermal shutdown crashes running MPI jobs.
+
+6. **Dense Semantic Vector Embeddings for Runbook Retrieval:**
    - *Current Mechanism:* Runbook lookup uses structured keyword, scenario, and alias matching.
    - *Proposed Enhancement:* Integrate dense vector embeddings (`NV-Embed-QA` via NVIDIA NIM) stored in an in-memory vector index. This enables semantic retrieval when novel log messages contain colloquial operator phrasing or vendor-specific error strings not present in keyword indices.
 
-6. **Spatial-Temporal Cluster Topology Graph Correlation:**
+7. **Spatial-Temporal Cluster Topology Graph Correlation:**
    - *Current Mechanism:* Triage evaluates log events individually, with debouncing keyed by template signature.
    - *Proposed Enhancement:* Implement an in-memory sliding-window topology graph representing the physical cluster hierarchy (Chassis $\rightarrow$ Leaf Switch $\rightarrow$ Spine Switch $\rightarrow$ Compute Rack). When an upstream spine switch drops, graph correlation identifies the single root-cause ancestor switch within milliseconds, suppressing thousands of downstream derivative alerts across compute nodes.
 
