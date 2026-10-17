@@ -1,4 +1,4 @@
-"""Data models for HPC log events, rules, and problem resolutions."""
+"""Data models for HPC log events, regex tree envelopes, child rules, and resolutions."""
 
 import re
 from typing import Any, Literal
@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 ValidationStatus = Literal["PENDING", "VALIDATED", "REJECTED"]
+RuleType = Literal["ACTIONABLE_ERROR", "BENIGN_TELEMETRY"]
 
 
 class ProblemResolution(BaseModel):
@@ -15,7 +16,11 @@ class ProblemResolution(BaseModel):
     root_cause: str = Field(default="", description="Root cause of the error")
     severity: str = Field(
         default="UNKNOWN",
-        description="Severity level (e.g., LOW, MEDIUM, HIGH, CRITICAL)",
+        description="Severity level (e.g., INFO, LOW, MEDIUM, HIGH, CRITICAL)",
+    )
+    is_benign: bool = Field(
+        default=False,
+        description="True if the log event represents routine benign telemetry requiring no action",
     )
     remediation_steps: list[str] = Field(
         default_factory=list,
@@ -28,8 +33,15 @@ class ProblemResolution(BaseModel):
     suggested_log_template_regex: str = Field(
         default="",
         description=(
-            "Generalized Python regular expression pattern matching this failure mode "
-            "for fast-path problem resolution and template parsing."
+            "Generalized Python regular expression pattern matching the parent log envelope "
+            "(when unparsed) or the child failure message (when envelope is parsed)."
+        ),
+    )
+    suggested_message_regex: str = Field(
+        default="",
+        description=(
+            "Optional generalized Python regex matching the extracted message body "
+            "when synthesizing a new parent envelope for an unparsed log."
         ),
     )
     format_string: str = Field(
@@ -41,22 +53,10 @@ class ProblemResolution(BaseModel):
     )
 
 
-class ProblemResolutionWithRegex(ProblemResolution):
-    """Backwards-compatible subclass for resolutions containing template regex."""
-
-    pass
-
-
-RuleType = Literal["ACTIONABLE_ERROR", "BENIGN_TELEMETRY"]
-
-
 class Rule(BaseModel):
-    """Pre-configured rule for fast-path problem resolution or routine telemetry filtration."""
+    """Child message rule scoped under a ParentEnvelope for fast-path resolution or filtering."""
 
     rule_id: str = Field(default="", description="Unique identifier for the rule")
-    parent_id: str = Field(default="*", description="Parent envelope template ID or '*' for all")
-    subsystem: str = Field(default="*", description="Subsystem filter or '*' for all")
-    event_type: str = Field(default="*", description="Event type filter or '*' for all")
     pattern: str = Field(
         default="",
         description="Regular expression pattern to match against event.message",
@@ -98,11 +98,13 @@ class Rule(BaseModel):
 
 
 class ParentEnvelope(BaseModel):
-    """Parent log envelope regex defining outer log structure and extracting fields."""
+    """Parent log envelope regex defining outer log structure and child message rules."""
 
     parent_id: str = Field(description="Unique identifier for the envelope template")
-    envelope_regex: str = Field(
-        description="Python regex with named capture groups (?P<name>...) ending in (?P<message>.*)"
+    envelope_regex: str = Field(description="Python regex with named capture groups (?P<name>...)")
+    format_string: str = Field(
+        default="",
+        description="Format string using named capture groups to reconstruct the original log",
     )
     description: str = Field(
         default="",
@@ -137,71 +139,43 @@ class ParentEnvelope(BaseModel):
 
 
 class LogEvent(BaseModel):
-    """Normalized structured representation of an HPC log stream event."""
+    """Generic key-value representation of a log stream event extracted via regex."""
 
     model_config = ConfigDict(extra="allow")
 
-    log_id: str = Field(default="", description="Unique identifier of the log entry")
-    node: str = Field(default="", description="Cluster node identifier (e.g., node-25)")
-    subsystem: str = Field(default="", description="Subsystem or daemon reporting the event")
-    event_type: str = Field(default="", description="Specific event category or type")
-    timestamp: int = Field(default=0, description="Epoch timestamp of the event")
-    flag: int = Field(default=0, description="Log flag or status code")
-    message: str = Field(default="", description="Normalized message body")
-    raw: str = Field(default="", description="Original unparsed log line")
+    raw: str = Field(default="", description="Original raw log line")
+    message: str = Field(default="", description="Extracted message body or raw line if unparsed")
     format_string: str = Field(
         default="",
         description="Format string using named capture groups to reconstruct the original log",
     )
     is_unparsed: bool = Field(
         default=False,
-        description="Whether log was unparsed by registered templates",
+        description="Whether log was unparsed by registered parent envelopes",
+    )
+    parent_id: str = Field(
+        default="",
+        description="Identifier of the matched ParentEnvelope, or empty if unparsed",
     )
 
-    def __init__(
-        self,
-        log_id: str = "",
-        node: str = "",
-        subsystem: str = "",
-        event_type: str = "",
-        timestamp: int = 0,
-        flag: int = 0,
-        message: str = "",
-        raw: str = "",
-        format_string: str = "",
-        is_unparsed: bool = False,
-        **data: Any,
-    ) -> None:
-        if (
-            log_id
-            or node
-            or subsystem
-            or event_type
-            or timestamp
-            or flag
-            or message
-            or raw
-            or format_string
-            or is_unparsed
-        ):
-            data.setdefault("log_id", log_id)
-            data.setdefault("node", node)
-            data.setdefault("subsystem", subsystem)
-            data.setdefault("event_type", event_type)
-            data.setdefault("timestamp", timestamp)
-            data.setdefault("flag", flag)
-            data.setdefault("message", message)
-            data.setdefault("raw", raw)
-            data.setdefault("format_string", format_string)
-            data.setdefault("is_unparsed", is_unparsed)
-        super().__init__(**data)
+    @property
+    def fields(self) -> dict[str, Any]:
+        """Return dictionary of dynamically extracted capture group fields."""
+        return dict(self.model_extra or {})
+
+    def get(self, key: str, default: Any = "") -> Any:
+        """Retrieve a dynamic capture group field or core attribute by key."""
+        if self.model_extra and key in self.model_extra:
+            return self.model_extra[key]
+        if key in {"raw", "message", "format_string", "is_unparsed", "parent_id"}:
+            return getattr(self, key, default)
+        return default
 
     def reconstruct(self) -> str:
         """Reconstruct the original raw log line using format_string and key-value fields."""
         if self.format_string:
             try:
-                data = self.model_dump()
-                return self.format_string.format_map(data)
+                return self.format_string.format_map(self.model_dump())
             except Exception:
                 pass
         return self.raw

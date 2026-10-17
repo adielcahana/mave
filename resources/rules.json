@@ -1,104 +1,170 @@
 [
   {
-    "rule_id": "RULE-PSU-01",
-    "subsystem": "switch_module",
-    "event_type": "psu",
-    "pattern": "PSU status \\( (?:off on|on off) \\)",
-    "resolution": {
-      "error_summary": "PSU failure detected",
-      "root_cause": "Power supply unit degraded or powered off on switch module",
-      "severity": "HIGH",
-      "remediation_steps": [
-        "Inspect physical switch power module indicator LEDs",
-        "Replace failed PSU unit or reconnect power feed"
-      ],
-      "citations_and_reasons": [
-        "Hardware manual section 4.2: Redundant PSU Operations"
-      ]
-    },
-    "human_validated": true,
-    "validation_status": "VALIDATED"
+    "parent_id": "LANL_STANDARD",
+    "envelope_regex": "^(?P<log_id>\\S+)\\s+(?:(?P<node>\\S+)\\s+)?(?P<subsystem>\\S+)\\s+(?P<event_type>\\S+)\\s+(?P<timestamp>-?\\d+)\\s+(?P<flag>-?\\d+)\\s+(?P<message>.*)$",
+    "format_string": "",
+    "description": "LANL standard 6/7-token log envelope",
+    "children": [
+      {
+        "rule_id": "RULE-BENIGN-FAN",
+        "pattern": "^Fan speeds \\( .* \\)$",
+        "rule_type": "BENIGN_TELEMETRY",
+        "resolution": null,
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-BENIGN-AMBIENT",
+        "pattern": "^ambient\\s*=\\s*\\d+$",
+        "rule_type": "BENIGN_TELEMETRY",
+        "resolution": null,
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-BENIGN-LINK-OK",
+        "pattern": "^Link ok$",
+        "rule_type": "BENIGN_TELEMETRY",
+        "resolution": null,
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-BENIGN-NORMAL",
+        "pattern": "^normal$",
+        "rule_type": "BENIGN_TELEMETRY",
+        "resolution": null,
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-BENIGN-RUNNING",
+        "pattern": "^(?:status )?running$",
+        "rule_type": "BENIGN_TELEMETRY",
+        "resolution": null,
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-BENIGN-RESPONDING",
+        "pattern": "^responding$",
+        "rule_type": "BENIGN_TELEMETRY",
+        "resolution": null,
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-PSU-01",
+        "pattern": "PSU status \\( (?:off on|on off) \\)",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "PSU failure detected",
+          "root_cause": "Power supply unit degraded or powered off on switch module",
+          "severity": "HIGH",
+          "remediation_steps": [
+            "Inspect physical switch power module indicator LEDs",
+            "Replace failed PSU unit or reconnect power feed"
+          ],
+          "citations_and_reasons": [
+            "Hardware manual section 4.2: Redundant PSU Operations"
+          ]
+        },
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-FS-FULL-01",
+        "pattern": "ServerFileSystem: ServerFileSystem domain \\S+ is full",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "Cluster filesystem domain full",
+          "root_cause": "Storage domain exceeded 100% capacity",
+          "severity": "HIGH",
+          "remediation_steps": [
+            "Purge expired scratch directories and temporary dumps",
+            "Expand volume quota or allocate additional storage domains"
+          ],
+          "citations_and_reasons": [
+            "LANL Storage Architecture Guide: Sec 8.3 Filesystem Quotas"
+          ]
+        },
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-FS-PANIC-01",
+        "pattern": "ServerFileSystem: ServerFileSystem domain \\S+ is panicked",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "Cluster filesystem domain panic",
+          "root_cause": "Severe filesystem metadata inconsistency or I/O barrier timeout",
+          "severity": "CRITICAL",
+          "remediation_steps": [
+            "Quarantine and unmount the affected storage domain immediately",
+            "Execute filesystem consistency check (advfsck)",
+            "Restore corrupted metadata from snapshot if unrecoverable"
+          ],
+          "citations_and_reasons": [
+            "LANL Storage Architecture Guide: Sec 8.1 Panic Recovery"
+          ]
+        },
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-NET-ALT0-01",
+        "pattern": "(?:interface alt0 is down|Component \\S*alt0\\S* is in the unavailable state)",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "Network interface alt0 unavailable",
+          "root_cause": "Physical network link loss or transceiver failure on alt0",
+          "severity": "HIGH",
+          "remediation_steps": [
+            "Verify physical Ethernet/InfiniBand patch cord and switch port",
+            "Restart interface via `ifconfig alt0 down && ifconfig alt0 up`",
+            "Reseat optical transceiver if link does not recover"
+          ],
+          "citations_and_reasons": [
+            "LANL Unix Hardware Runbook: Sec 3.1 Interface Diagnostics"
+          ]
+        },
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      }
+    ]
   },
   {
-    "rule_id": "RULE-FS-FULL-01",
-    "subsystem": "clusterfilesystem",
-    "event_type": "fdmn.full",
-    "pattern": "ServerFileSystem: ServerFileSystem domain \\S+ is full",
-    "resolution": {
-      "error_summary": "Cluster filesystem domain full",
-      "root_cause": "Storage domain exceeded 100% capacity",
-      "severity": "HIGH",
-      "remediation_steps": [
-        "Purge expired scratch directories and temporary dumps",
-        "Expand volume quota or allocate additional storage domains"
-      ],
-      "citations_and_reasons": [
-        "LANL Storage Architecture Guide: Sec 8.3 Filesystem Quotas"
-      ]
-    },
-    "human_validated": true,
-    "validation_status": "VALIDATED"
+    "parent_id": "LANL_EXTENDED_DAEMON",
+    "envelope_regex": "^(?P<log_id>\\S+)\\s+(?P<subsystem>\\S+)\\s+(?P<node>\\S+)\\s+(?P<component>\\S+)\\s+(?P<event_type>\\S+)\\s+(?P<timestamp>-?\\d+)\\s+(?P<flag>-?\\d+)\\s+(?P<message>.*)$",
+    "format_string": "",
+    "description": "LANL 8-token extended daemon log envelope",
+    "children": [
+      {
+        "rule_id": "RULE-RESMGMT-ERR10-01",
+        "pattern": "failed to configure resourcemgmt subsystem err = 10",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "Resource manager daemon initialization failure",
+          "root_cause": "Subsystem configuration error code 10 during daemon startup",
+          "severity": "CRITICAL",
+          "remediation_steps": [
+            "Check node controller connectivity and verify daemon configuration file",
+            "Restart resourcemgmtdaeomon service"
+          ],
+          "citations_and_reasons": [
+            "LANL Resource Management Architecture Manual: Sec 5.2"
+          ]
+        },
+        "human_validated": true,
+        "validation_status": "VALIDATED"
+      }
+    ]
   },
   {
-    "rule_id": "RULE-FS-PANIC-01",
-    "subsystem": "clusterfilesystem",
-    "event_type": "fdmn.panic",
-    "pattern": "ServerFileSystem: ServerFileSystem domain \\S+ is panicked",
-    "resolution": {
-      "error_summary": "Cluster filesystem domain panic",
-      "root_cause": "Severe filesystem metadata inconsistency or I/O barrier timeout",
-      "severity": "CRITICAL",
-      "remediation_steps": [
-        "Quarantine and unmount the affected storage domain immediately",
-        "Execute filesystem consistency check (advfsck)",
-        "Restore corrupted metadata from snapshot if unrecoverable"
-      ],
-      "citations_and_reasons": [
-        "LANL Storage Architecture Guide: Sec 8.1 Panic Recovery"
-      ]
-    },
-    "human_validated": true,
-    "validation_status": "VALIDATED"
-  },
-  {
-    "rule_id": "RULE-NET-ALT0-01",
-    "subsystem": "unix.hw",
-    "event_type": "*",
-    "pattern": "(?:interface alt0 is down|Component \\S*alt0\\S* is in the unavailable state)",
-    "resolution": {
-      "error_summary": "Network interface alt0 unavailable",
-      "root_cause": "Physical network link loss or transceiver failure on alt0",
-      "severity": "HIGH",
-      "remediation_steps": [
-        "Verify physical Ethernet/InfiniBand patch cord and switch port",
-        "Restart interface via `ifconfig alt0 down && ifconfig alt0 up`",
-        "Reseat optical transceiver if link does not recover"
-      ],
-      "citations_and_reasons": [
-        "LANL Unix Hardware Runbook: Sec 3.1 Interface Diagnostics"
-      ]
-    },
-    "human_validated": true,
-    "validation_status": "VALIDATED"
-  },
-  {
-    "rule_id": "RULE-RESMGMT-ERR10-01",
-    "subsystem": "resourcemgmtdaeomon",
-    "event_type": "*",
-    "pattern": "failed to configure resourcemgmt subsystem err = 10",
-    "resolution": {
-      "error_summary": "Resource manager daemon initialization failure",
-      "root_cause": "Subsystem configuration error code 10 during daemon startup",
-      "severity": "CRITICAL",
-      "remediation_steps": [
-        "Check node controller connectivity and verify daemon configuration file",
-        "Restart resourcemgmtdaeomon service"
-      ],
-      "citations_and_reasons": [
-        "LANL Resource Management Architecture Manual: Sec 5.2"
-      ]
-    },
-    "human_validated": true,
-    "validation_status": "VALIDATED"
+    "parent_id": "RFC5424_SYSLOG",
+    "envelope_regex": "^<(?P<priority>\\d+)>(?P<version>\\d+)\\s+(?P<timestamp>\\S+)\\s+(?P<node>\\S+)\\s+(?P<subsystem>\\S+)\\s+(?P<procid>\\S+)\\s+(?P<msgid>\\S+)\\s+(?P<message>.*)$",
+    "format_string": "",
+    "description": "Standard RFC5424 syslog envelope",
+    "children": []
   }
 ]

@@ -1,26 +1,31 @@
-"""Rules package for HPC log parsing, normalization, filtering, and fast-path resolution."""
+"""Rules package for regex tree log parsing, telemetry filtering, and fast-path resolution."""
 
 from src.rules.engine import (
     RuleTreeEngine,
-    extract_template,
+    derive_format_string,
+    extract_group_patterns,
     get_default_benign_cases,
-    get_default_rules,
-    template_to_regex,
+    get_default_envelopes,
 )
-from src.rules.models import LogEvent, ProblemResolution, Rule, ValidationStatus
-from src.rules.normalizer import parse_log_line
-from src.rules.telemetry_filter import TelemetryFilter
+from src.rules.models import (
+    LogEvent,
+    ParentEnvelope,
+    ProblemResolution,
+    Rule,
+    RuleType,
+    ValidationStatus,
+)
 
 __all__ = [
     "LogEvent",
+    "ParentEnvelope",
     "ProblemResolution",
     "Rule",
     "RuleTreeEngine",
-    "TelemetryFilter",
+    "RuleType",
     "ValidationStatus",
-    "extract_template",
+    "derive_format_string",
+    "extract_group_patterns",
     "get_default_benign_cases",
-    "get_default_rules",
-    "parse_log_line",
-    "template_to_regex",
+    "get_default_envelopes",
 ]
