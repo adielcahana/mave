@@ -264,10 +264,6 @@ class RuleTreeEngine:
             for key in sorted(self._group_patterns.keys())
         }
 
-    def get_known_group_names(self) -> list[str]:
-        """Return unique sorted list of named capture groups across registered envelopes."""
-        return sorted(self._group_patterns.keys())
-
     def load_defaults(self) -> list[ParentEnvelope]:
         """Load default hierarchical regex tree from resources/rules.json."""
         envelopes = get_default_envelopes(self.rules_path)
@@ -374,14 +370,6 @@ class RuleTreeEngine:
 
         if persist and self.rules_path:
             self.save_to_file()
-
-    def clear_rules(self) -> None:
-        """Clear all envelopes and rules from the engine."""
-        self._envelopes.clear()
-        self._compiled_disjunction = None
-        self._branch_map.clear()
-        self._envelope_samples.clear()
-        self._rule_samples.clear()
 
     def validate_rule_against_benign(
         self,
@@ -672,12 +660,3 @@ class RuleTreeEngine:
             return await asyncio.wait_for(task, timeout=timeout)
         rule = self.get_rule(rule_id)
         return rule.validation_status == "VALIDATED" if rule else False
-
-    async def wait_for_all_validations(self, timeout: float = 5.0) -> None:
-        """Wait for all pending background validation tasks to complete."""
-        tasks = [t for t in self._validation_tasks.values() if not t.done()]
-        if tasks:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=timeout,
-            )

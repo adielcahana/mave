@@ -61,13 +61,17 @@
           "error_summary": "PSU failure detected",
           "root_cause": "Power supply unit degraded or powered off on switch module",
           "severity": "HIGH",
+          "is_benign": false,
           "remediation_steps": [
             "Inspect physical switch power module indicator LEDs",
             "Replace failed PSU unit or reconnect power feed"
           ],
           "citations_and_reasons": [
             "Hardware manual section 4.2: Redundant PSU Operations"
-          ]
+          ],
+          "suggested_log_template_regex": "",
+          "suggested_message_regex": "",
+          "format_string": ""
         },
         "human_validated": true,
         "validation_status": "VALIDATED"
@@ -80,13 +84,17 @@
           "error_summary": "Cluster filesystem domain full",
           "root_cause": "Storage domain exceeded 100% capacity",
           "severity": "HIGH",
+          "is_benign": false,
           "remediation_steps": [
             "Purge expired scratch directories and temporary dumps",
             "Expand volume quota or allocate additional storage domains"
           ],
           "citations_and_reasons": [
             "LANL Storage Architecture Guide: Sec 8.3 Filesystem Quotas"
-          ]
+          ],
+          "suggested_log_template_regex": "",
+          "suggested_message_regex": "",
+          "format_string": ""
         },
         "human_validated": true,
         "validation_status": "VALIDATED"
@@ -99,6 +107,7 @@
           "error_summary": "Cluster filesystem domain panic",
           "root_cause": "Severe filesystem metadata inconsistency or I/O barrier timeout",
           "severity": "CRITICAL",
+          "is_benign": false,
           "remediation_steps": [
             "Quarantine and unmount the affected storage domain immediately",
             "Execute filesystem consistency check (advfsck)",
@@ -106,7 +115,10 @@
           ],
           "citations_and_reasons": [
             "LANL Storage Architecture Guide: Sec 8.1 Panic Recovery"
-          ]
+          ],
+          "suggested_log_template_regex": "",
+          "suggested_message_regex": "",
+          "format_string": ""
         },
         "human_validated": true,
         "validation_status": "VALIDATED"
@@ -119,6 +131,7 @@
           "error_summary": "Network interface alt0 unavailable",
           "root_cause": "Physical network link loss or transceiver failure on alt0",
           "severity": "HIGH",
+          "is_benign": false,
           "remediation_steps": [
             "Verify physical Ethernet/InfiniBand patch cord and switch port",
             "Restart interface via `ifconfig alt0 down && ifconfig alt0 up`",
@@ -126,9 +139,88 @@
           ],
           "citations_and_reasons": [
             "LANL Unix Hardware Runbook: Sec 3.1 Interface Diagnostics"
-          ]
+          ],
+          "suggested_log_template_regex": "",
+          "suggested_message_regex": "",
+          "format_string": ""
         },
         "human_validated": true,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-AUTO-e6c95219",
+        "pattern": "^Component State Change: Component \\\\042(.+?)\\\\042 is in the unavailable state \\(HWID=\\d+\\)$",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "SCSI-WWID component (HWID=921) transitioned to unavailable state on node-250.",
+          "root_cause": "Hardware inventory monitor detected a cluster component (PCIe adapter, SCSI disk, or controller) transitioned to unavailable state due to bus timeout or hardware fault.",
+          "severity": "HIGH",
+          "is_benign": false,
+          "remediation_steps": [
+            "Query hardware inventory with component HWID to identify the failing physical device.",
+            "Check IPMI system event logs (SEL) and sensor health for power/thermal anomalies.",
+            "Execute hardware bus rescan (`rescan-scsi-bus` or PCIe hotplug reset).",
+            "Schedule node maintenance for hardware component reseat or field replacement."
+          ],
+          "citations_and_reasons": [
+            "[LANL HPC Runbook: unix-hw-state-change-v1.5] - Hardware Component State Change Unavailable scenario"
+          ],
+          "suggested_log_template_regex": "^Component State Change: Component \\\\042(.+?)\\\\042 is in the unavailable state \\(HWID=\\d+\\)$",
+          "suggested_message_regex": "",
+          "format_string": ""
+        },
+        "human_validated": false,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-AUTO-a469adfa",
+        "pattern": "Component\\ State\\ Change:\\ Component\\ \\d+SCSI\\-WWID:\\d+:\\d+\\-\\d+fe\\d+\\-\\d+\\-ed\\d+\\-\\d+\\-\\d+\\-\\d+\\-\\d+a\\d+\\ is\\ in\\ the\\ unavailable\\ state\\ \\(HWID=\\d+\\)",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "SCSI-WWID component transitioned to unavailable state (HWID=69) on node-32",
+          "root_cause": "Hardware inventory monitor detected a cluster component (PCIe adapter, SCSI disk, or controller) transitioned to unavailable state due to bus timeout or hardware fault.",
+          "severity": "HIGH",
+          "is_benign": false,
+          "remediation_steps": [
+            "Query hardware inventory with component HWID to identify the failing physical device.",
+            "Check IPMI system event logs (SEL) and sensor health for power/thermal anomalies.",
+            "Execute hardware bus rescan (`rescan-scsi-bus` or PCIe hotplug reset).",
+            "Schedule node maintenance for hardware component reseat or field replacement."
+          ],
+          "citations_and_reasons": [
+            "[LANL HPC Runbook: unix-hw-state-change-v1.5] - Hardware Component State Change Unavailable scenario"
+          ],
+          "suggested_log_template_regex": "^Component State Change: Component \\\\\\\\042(.+?)\\\\\\\\042 is in the unavailable state \\\\(HWID=\\\\d+\\\\)$",
+          "suggested_message_regex": "",
+          "format_string": ""
+        },
+        "human_validated": false,
+        "validation_status": "VALIDATED"
+      },
+      {
+        "rule_id": "RULE-AUTO-b00ad5e4",
+        "pattern": "Component\\ State\\ Change:\\ Component\\ \\d+SCSI\\-WWID:\\d+:\\d+\\-\\d+fe\\d+\\-\\d+\\-ed\\d+\\-\\d+\\-\\d+\\-\\d+\\-\\d+f\\d+\\ is\\ in\\ the\\ unavailable\\ state\\ \\(HWID=\\d+\\)",
+        "rule_type": "ACTIONABLE_ERROR",
+        "resolution": {
+          "error_summary": "SCSI-WWID component transitioned to unavailable state (HWID=69) on node-64.",
+          "root_cause": "Hardware inventory monitor detected a cluster component (PCIe adapter, SCSI disk, or controller) transitioned to unavailable state due to bus timeout or hardware fault.",
+          "severity": "HIGH",
+          "is_benign": false,
+          "remediation_steps": [
+            "Query hardware inventory with component HWID to identify the failing physical device.",
+            "Check IPMI system event logs (SEL) and sensor health for power/thermal anomalies.",
+            "Execute hardware bus rescan (`rescan-scsi-bus` or PCIe hotplug reset).",
+            "Schedule node maintenance for hardware component reseat or field replacement."
+          ],
+          "citations_and_reasons": [
+            "[LANL HPC Runbook: unix-hw-state-change-v1.5] - Hardware Component State Change Unavailable scenario",
+            "[LANL HPC Runbook: unix-hw-state-change-v1.5]"
+          ],
+          "suggested_log_template_regex": "^Component State Change: Component \\\\\\\\042(.+?)\\\\\\\\042 is in the unavailable state \\\\(HWID=\\\\d+\\\\)$",
+          "suggested_message_regex": "",
+          "format_string": ""
+        },
+        "human_validated": false,
         "validation_status": "VALIDATED"
       }
     ]
@@ -147,13 +239,17 @@
           "error_summary": "Resource manager daemon initialization failure",
           "root_cause": "Subsystem configuration error code 10 during daemon startup",
           "severity": "CRITICAL",
+          "is_benign": false,
           "remediation_steps": [
             "Check node controller connectivity and verify daemon configuration file",
             "Restart resourcemgmtdaeomon service"
           ],
           "citations_and_reasons": [
             "LANL Resource Management Architecture Manual: Sec 5.2"
-          ]
+          ],
+          "suggested_log_template_regex": "",
+          "suggested_message_regex": "",
+          "format_string": ""
         },
         "human_validated": true,
         "validation_status": "VALIDATED"
