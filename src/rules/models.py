@@ -28,7 +28,10 @@ class ProblemResolution(BaseModel):
     )
     citations_and_reasons: list[str] = Field(
         default_factory=list,
-        description="Citations and technical rationale",
+        description=(
+            "Citations and technical rationale (local runbook IDs or web citations "
+            "including full http/https URLs)"
+        ),
     )
     suggested_log_template_regex: str = Field(
         default="",

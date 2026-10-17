@@ -10,7 +10,6 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from src.config import get_settings
 from src.knowledge.search import (
     read_local_file,
-    search_external_knowledge,
     search_local_docs,
     search_web_docs,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "analyze_log",
     "create_agent",
     "read_local_file",
-    "search_external_knowledge",
     "search_local_docs",
     "search_web_docs",
     "validate_suggested_regex",
@@ -58,8 +56,9 @@ Operational Guidelines:
 
 5. Strict Citation Requirements:
    - Every resolution MUST cite specific runbooks or sources in `citations_and_reasons`.
-   - Use the official citation identifier (e.g., "[LANL HPC Runbook: ...]" or "[Web Source: ...]")
-     and technical reasons.
+   - For local runbooks, use the official citation identifier (e.g., "[LANL HPC Runbook: ...]").
+   - For web search results, ALWAYS include the full source URL in the citation
+     (e.g., "[Web Source: <Title> (https://...)] - <reason>").
 
 You must always structure your output as a ProblemResolution object.
 """
@@ -152,6 +151,20 @@ def create_agent(
         ctx: RunContext[LogEvent],
         output: ProblemResolution,
     ) -> ProblemResolution:
+        for cite in output.citations_and_reasons:
+            lower_cite = cite.lower()
+            if (
+                ("web source" in lower_cite or "web:" in lower_cite)
+                and "http://" not in lower_cite
+                and "https://" not in lower_cite
+                and ctx.retry < _MAX_RESULT_RETRIES
+            ):
+                raise ModelRetry(
+                    f"Web citation '{cite}' in `citations_and_reasons` is missing its source URL. "
+                    f"Every web citation must include the full http:// or https:// URL "
+                    f"(e.g., '[Web Source: Title (https://...)] - reason')."
+                )
+
         log_event = ctx.deps
         if not log_event.is_unparsed:
             if output.suggested_log_template_regex.strip():
@@ -223,7 +236,7 @@ def _build_incident_prompt(
         "3. Diagnose the root cause and determine severity (CRITICAL, HIGH, MEDIUM, LOW, INFO). "
         "If the log is routine benign telemetry, set `is_benign=True`.\n"
         "4. Provide ordered remediation steps and cite specific runbooks or web sources "
-        "in citations_and_reasons."
+        "in `citations_and_reasons` (for web sources, ALWAYS include the full http/https URL)."
     )
     if log_event.is_unparsed:
         base_prompt += (

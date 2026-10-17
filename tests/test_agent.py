@@ -128,7 +128,7 @@ async def test_analyze_log_with_unparsed_log_and_model_retry() -> None:
 
     attempt = 0
 
-    def custom_model_fn(messages: list[Any], info: Any) -> Any:
+    def custom_model_fn(_messages: list[Any], _info: Any) -> Any:
         nonlocal attempt
         attempt += 1
         from pydantic_ai.messages import ModelResponse, ToolCallPart
@@ -246,7 +246,7 @@ async def test_analyze_log_with_test_model() -> None:
 async def test_analyze_log_raises_on_model_failure() -> None:
     """Verify analyze_log re-raises exception when LLM inference fails."""
 
-    def failing_fn(messages: Any, info: Any) -> Any:
+    def failing_fn(_messages: Any, _info: Any) -> Any:
         raise ConnectionError("NVIDIA NIM endpoint unreachable (offline test)")
 
     log_event = LogEvent(

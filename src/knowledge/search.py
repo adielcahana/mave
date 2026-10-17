@@ -5,6 +5,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
@@ -24,6 +25,25 @@ def _clean_html(raw_html: str) -> str:
     """Strip HTML tags and unescape HTML entities."""
     no_tags = re.sub(r"<[^<]+?>", "", raw_html)
     return html.unescape(no_tags).strip()
+
+
+def _normalize_search_url(raw_url: str) -> str:
+    """Unwrap DuckDuckGo redirect URLs and ensure a valid http/https URL."""
+    url = html.unescape(raw_url).strip()
+    if not url:
+        return "https://duckduckgo.com"
+    if url.startswith("//"):
+        url = "https:" + url
+    parsed = urlparse(url)
+    if "duckduckgo.com" in parsed.netloc and parsed.query:
+        qs = parse_qs(parsed.query)
+        if "uddg" in qs and qs["uddg"]:
+            target = unquote(qs["uddg"][0]).strip()
+            if target:
+                url = target
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url.lstrip("/")
+    return url
 
 
 async def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
@@ -76,7 +96,8 @@ async def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
     for i in range(total):
         title = _clean_html(title_matches[i])
         snippet = _clean_html(snippet_matches[i])
-        url = url_matches[i] if i < len(url_matches) else "https://duckduckgo.com"
+        raw_url = url_matches[i] if i < len(url_matches) else "https://duckduckgo.com"
+        url = _normalize_search_url(raw_url)
         if snippet:
             results.append({"title": title, "snippet": snippet, "url": url})
 
@@ -111,7 +132,10 @@ async def search_web_docs(query: str, max_results: int = 5) -> str:
     sections: list[str] = [f"### Web Search Results for '{clean_q}':"]
     for hit in hits:
         sections.append(
-            f"- **Title:** {hit['title']}\n  **URL:** {hit['url']}\n  **Snippet:** {hit['snippet']}"
+            f"- **Title:** {hit['title']}\n"
+            f"  **URL:** {hit['url']}\n"
+            f"  **Citation:** [Web Source: {hit['title']} ({hit['url']})]\n"
+            f"  **Snippet:** {hit['snippet']}"
         )
     return "\n\n".join(sections)
 
