@@ -196,14 +196,36 @@ Evaluation was executed across our 150-scenario golden evaluation benchmark (`da
 
 ---
 
-## 6. Suggested Future Improvements (Algorithmic)
+## 6. Suggested Future Improvements (Algorithmic & Architecture)
 
-1. **Dense Semantic Vector Embeddings for Runbook Retrieval:**
-   - *Current State:* Runbook lookup uses structured keyword, scenario, and alias matching.
-   - *Proposed Enhancement:* Integrate dense vector embeddings (`NV-Embed-QA` via NVIDIA NIM) stored in an in-memory vector index. This enables semantic retrieval when novel log messages contain colloquial phrasing or vendor-specific error strings not present in keyword indices.
-2. **Spatial-Temporal Cluster Graph Correlation:**
-   - *Current State:* Triage evaluates log events individually, with debouncing keyed by template signature.
-   - *Proposed Enhancement:* Implement an in-memory sliding-window topology graph representing the physical cluster hierarchy (Chassis $\rightarrow$ Leaf Switch $\rightarrow$ Spine Switch $\rightarrow$ Compute Rack). When an upstream spine switch fails, graph correlation identifies the single root-cause ancestor node within milliseconds, suppressing hundreds of cascading downstream alerts.
+1. **Two-Tier LLM Hierarchy: Fast SLM Regex Debouncer + Frontier SRE Reasoning Agent:**
+   - *Current Mechanism:* In-flight debouncing coordinates concurrent requests via `asyncio.Future` promises while the main agent generates both the regex template and the remediation simultaneously.
+   - *Proposed Architecture:* Split novel log escalation into a pipelined, two-tier model hierarchy:
+     - **Fast-Tier SLM (e.g., 1B–3B parameter model):** Immediately invoked upon encountering an unclassified log to rapidly extract variable parameter slots and generate a template regex in <50ms. This regex is registered into `RuleTreeEngine` *instantly*, establishing an active debouncing shield that absorbs subsequent identical bursts across the cluster at wire speed.
+     - **Deep-Tier Frontier Agent (e.g., Llama 70B / Nemotron):** Once the storm is shielded, the incident context is asynchronously dispatched to the larger frontier agent for multi-step diagnostic reasoning, tool execution (`query_subsystem_docs`, external technical search), and cited remediation authoring without blocking the stream.
+
+2. **Domain-Specific Fine-Tuning of Task-Specialized SLMs:**
+   - *Rationale:* General-purpose frontier LLMs are over-parameterized and cost-prohibitive for deterministic tasks like log tokenization, header classification, and regex template synthesis.
+   - *Proposed Enhancement:* Fine-tune lightweight edge SLMs (e.g., Qwen-2.5-Coder-1.5B/3B, Llama-3.2-1B) directly on historical cluster telemetry, Syslog RFCs, and semi-structured HPC failure dumps.
+   - *Operational Impact:* Reduces token inference costs by 95%+, eliminates network API round-trip latency (<20ms local inference on cluster head-nodes), and improves regex syntax precision while eliminating hallucinations.
+
+3. **Dynamic In-Context Grounding via Live Cluster Stream Few-Shotting:**
+   - *Current Mechanism:* The agent relies on zero-shot instructions with static prompt examples.
+   - *Proposed Enhancement:* Maintain an in-memory sliding-window ring buffer of recently validated log envelopes, successfully matched regex patterns, and active cluster node topologies. When a novel failure is escalated, retrieve $k$-nearest live stream exemplars as few-shot prompt context for both the fast SLM and the reasoning agent.
+   - *Operational Impact:* Grounding the models on real-time operational vocabulary (node naming conventions, active Slurm job allocations, recent kernel patches) ensures high regex fidelity without requiring continuous model weight updates.
+
+4. **Post-Mortem Curation Agent Grounded in Real Faulty Compute Telemetry:**
+   - *Current Mechanism:* The offline consolidation loop verifies candidate rules primarily through synthetic replay against baseline normal log corpora.
+   - *Proposed Enhancement:* Close the feedback loop with physical infrastructure by deploying an offline Post-Mortem Curation Agent that correlates generated rules and runbooks against telemetry and outcomes from the *actual physical faulty compute nodes* (e.g., IPMI/BMC hardware logs, Slurm node recovery states, and hardware repair work-orders).
+   - *Operational Impact:* Verifies whether prescribed remediations genuinely restored faulty nodes or if kernel panics recurred post-remediation. Rules and runbooks are promoted to persistent production registries only after empirical validation against real-world compute recovery outcomes.
+
+5. **Dense Semantic Vector Embeddings for Runbook Retrieval:**
+   - *Current Mechanism:* Runbook lookup uses structured keyword, scenario, and alias matching.
+   - *Proposed Enhancement:* Integrate dense vector embeddings (`NV-Embed-QA` via NVIDIA NIM) stored in an in-memory vector index. This enables semantic retrieval when novel log messages contain colloquial operator phrasing or vendor-specific error strings not present in keyword indices.
+
+6. **Spatial-Temporal Cluster Topology Graph Correlation:**
+   - *Current Mechanism:* Triage evaluates log events individually, with debouncing keyed by template signature.
+   - *Proposed Enhancement:* Implement an in-memory sliding-window topology graph representing the physical cluster hierarchy (Chassis $\rightarrow$ Leaf Switch $\rightarrow$ Spine Switch $\rightarrow$ Compute Rack). When an upstream spine switch drops, graph correlation identifies the single root-cause ancestor switch within milliseconds, suppressing thousands of downstream derivative alerts across compute nodes.
 
 ---
 
