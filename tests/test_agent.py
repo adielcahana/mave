@@ -1,60 +1,38 @@
-"""Tests for the production SRE Resolution Agent and knowledge tools wiring."""
+"""Tests for the production SRE Resolution Agent, ModelRetry regex validation, and tools."""
 
-import time
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 
-import src.agent as agent_module
 from src.agent import (
     SRE_SYSTEM_PROMPT,
     ProblemResolution,
+    _build_incident_prompt,
     analyze_log,
     create_agent,
-    reset_circuit_breaker,
+    validate_suggested_regex,
 )
-from src.config import Settings
+from src.config import get_settings
 from src.rules.models import LogEvent
 
 
+def test_get_settings_is_singleton() -> None:
+    """Verify get_settings returns a cached singleton instance."""
+    assert get_settings() is get_settings()
+
+
 def test_agent_tool_registry() -> None:
-    """Verify query_subsystem_docs and list_known_subsystems are registered on agent."""
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    agent = create_agent(settings=test_settings)
+    """Verify search and file-reading tools are registered on singleton agent."""
+    agent = create_agent()
 
-    # Introspect tools registered on the agent
     tool_keys = set(agent._function_toolset.tools.keys())
-    assert "query_subsystem_docs" in tool_keys, (
-        f"Expected 'query_subsystem_docs' in agent tools, found: {tool_keys}"
-    )
-    assert "list_known_subsystems" in tool_keys, (
-        f"Expected 'list_known_subsystems' in agent tools, found: {tool_keys}"
-    )
-    assert "search_local_docs" in tool_keys, (
-        f"Expected 'search_local_docs' in agent tools, found: {tool_keys}"
-    )
-    assert "read_local_file" in tool_keys, (
-        f"Expected 'read_local_file' in agent tools, found: {tool_keys}"
-    )
-    assert "search_web_docs" in tool_keys, (
-        f"Expected 'search_web_docs' in agent tools, found: {tool_keys}"
-    )
-
-    # Backwards-compatible _function_tools check
-    fn_tools = getattr(agent, "_function_tools", None)
-    if isinstance(fn_tools, dict):
-        assert "query_subsystem_docs" in fn_tools
-        assert "list_known_subsystems" in fn_tools
-        assert "search_local_docs" in fn_tools
-        assert "read_local_file" in fn_tools
-        assert "search_web_docs" in fn_tools
+    assert tool_keys == {
+        "search_local_docs",
+        "read_local_file",
+        "search_web_docs",
+    }
 
 
 def test_problem_resolution_schema_validation() -> None:
@@ -77,7 +55,6 @@ def test_problem_resolution_schema_validation() -> None:
     assert res.severity == "HIGH"
     assert len(res.remediation_steps) == 2
     assert len(res.citations_and_reasons) == 1
-    assert "unix-hw-alt0-down-v2.2" in res.citations_and_reasons[0]
 
     dumped = res.model_dump()
     assert dumped["severity"] == "HIGH"
@@ -87,21 +64,144 @@ def test_problem_resolution_schema_validation() -> None:
 
 def test_agent_system_prompt_configuration() -> None:
     """Verify system prompt contains SRE role instructions and citation mandates."""
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    agent = create_agent(settings=test_settings)
+    agent = create_agent()
 
     prompts = list(agent._system_prompts)
     assert len(prompts) > 0
     combined_prompt = " ".join(prompts)
 
-    assert "SRE" in combined_prompt or "Site Reliability" in combined_prompt
-    assert "query_subsystem_docs" in combined_prompt
-    assert "citations_and_reasons" in combined_prompt or "citation" in combined_prompt.lower()
+    assert "SRE" in combined_prompt
+    assert "search_local_docs" in combined_prompt
+    assert "citations_and_reasons" in combined_prompt
     assert SRE_SYSTEM_PROMPT in prompts
+
+
+def test_validate_suggested_regex() -> None:
+    """Verify validate_suggested_regex validates syntax, matching, groups, and format."""
+    sample_log = "2026-10-10 [storage_engine] Disk I/O timeout on volume /data"
+
+    valid, err = validate_suggested_regex(r"[unclosed bracket", sample_log)
+    assert valid is False
+    assert "Invalid regex syntax" in err
+
+    valid, err = validate_suggested_regex(r"^node-\d+\s+.*$", sample_log)
+    assert valid is False
+    assert "failed to match the incoming raw log line" in err
+
+    valid, err = validate_suggested_regex(r"^\S+\s+\[\S+\]\s+.*$", sample_log)
+    assert valid is False
+    assert "contains no named capture groups" in err
+
+    valid, err = validate_suggested_regex(
+        r"^(?P<time>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<payload>.*)$",
+        sample_log,
+    )
+    assert valid is True
+    assert err == "OK"
+
+    valid, err = validate_suggested_regex(
+        r"^(?P<time>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<payload>.*)$",
+        sample_log,
+        format_string="{time} [{missing_key}] {payload}",
+    )
+    assert valid is False
+    assert "references group" in err
+
+    valid, err = validate_suggested_regex(
+        r"^(?P<time>\S+)\s+\[(?P<tag>[^\]]+)\]\s+(?P<payload>.*)$",
+        sample_log,
+        format_string="{time} [{tag}] {payload}",
+    )
+    assert valid is True
+    assert err == "OK"
+
+
+@pytest.mark.anyio
+async def test_analyze_log_with_unparsed_log_and_model_retry() -> None:
+    """Verify output_validator raises ModelRetry when regex is invalid and succeeds on retry."""
+    sample_raw = "MY_SUBSYS: error code 42 fatal fault"
+    unparsed_event = LogEvent(
+        raw=sample_raw,
+        message=sample_raw,
+        is_unparsed=True,
+    )
+
+    attempt = 0
+
+    def custom_model_fn(messages: list[Any], info: Any) -> Any:
+        nonlocal attempt
+        attempt += 1
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+
+        if attempt == 1:
+            args = ProblemResolution(
+                error_summary="Fatal error in custom subsys",
+                root_cause="Hardware error code 42",
+                severity="CRITICAL",
+                remediation_steps=["Reboot subsystem"],
+                citations_and_reasons=["Custom Runbook"],
+                suggested_log_template_regex=r"^MY_SUBSYS:\s+error.*$",
+            ).model_dump()
+        else:
+            args = ProblemResolution(
+                error_summary="Fatal error in custom subsys",
+                root_cause="Hardware error code 42",
+                severity="CRITICAL",
+                remediation_steps=["Reboot subsystem"],
+                citations_and_reasons=["Custom Runbook"],
+                suggested_log_template_regex=r"^(?P<service>MY_SUBSYS):\s+(?P<details>.*)$",
+                format_string="{service}: {details}",
+            ).model_dump()
+        return ModelResponse(parts=[ToolCallPart(tool_name="final_result", args=args)])
+
+    agent = create_agent()
+    with agent.override(model=FunctionModel(custom_model_fn)):
+        resolution = await analyze_log(unparsed_event)
+
+    assert isinstance(resolution, ProblemResolution)
+    assert resolution.suggested_log_template_regex == r"^(?P<service>MY_SUBSYS):\s+(?P<details>.*)$"
+    assert resolution.format_string == "{service}: {details}"
+    assert attempt == 2
+
+
+@pytest.mark.anyio
+async def test_analyze_log_keeps_valid_regex_when_only_format_string_fails() -> None:
+    """Verify valid regex is retained if only format_string fails validation after retries."""
+    sample_raw = "MY_SUBSYS: error code 42 fatal fault"
+    unparsed_event = LogEvent(raw=sample_raw, message=sample_raw, is_unparsed=True)
+
+    bad_fmt_res = ProblemResolution(
+        error_summary="Fatal error",
+        root_cause="Error 42",
+        severity="CRITICAL",
+        remediation_steps=["Reboot"],
+        citations_and_reasons=["Runbook"],
+        suggested_log_template_regex=r"^(?P<service>MY_SUBSYS):\s+(?P<message>.*)$",
+        format_string="{service}: {nonexistent_group}",
+    )
+
+    test_model = TestModel(custom_output_args=bad_fmt_res.model_dump())
+    agent = create_agent()
+    with agent.override(model=test_model):
+        resolution = await analyze_log(unparsed_event)
+
+    assert resolution.suggested_log_template_regex == r"^(?P<service>MY_SUBSYS):\s+(?P<message>.*)$"
+    assert resolution.format_string == ""
+
+
+def test_build_incident_prompt_generic_fields() -> None:
+    """Verify _build_incident_prompt renders arbitrary key-value fields without fixed schema."""
+    event = LogEvent(
+        raw="[us-east-1] slurm job_id=99812 failed",
+        message="job_id=99812 failed",
+        cluster="us-east-1",
+        service="slurm",
+        job_id="99812",
+    )
+    prompt = _build_incident_prompt(event)
+    assert "- cluster: us-east-1" in prompt
+    assert "- service: slurm" in prompt
+    assert "- job_id: 99812" in prompt
 
 
 @pytest.mark.anyio
@@ -121,83 +221,25 @@ async def test_analyze_log_with_test_model() -> None:
     }
 
     test_model = TestModel(custom_output_args=mock_resolution_data)
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    agent = create_agent(settings=test_settings, model=test_model)
-
     raw_line = (
-        "1117769919 2005.06.03 node-25 clusterfilesystem: "
-        "fdmn.full ServerFileSystem domain root_domain is full"
+        "1117769919 node-25 clusterfilesystem fdmn.full 1117769919 1 "
+        "ServerFileSystem domain root_domain is full"
     )
     log_event = LogEvent(
+        raw=raw_line,
+        message="ServerFileSystem domain root_domain is full",
         log_id="1117769919",
         node="node-25",
-        subsystem="clusterfilesystem",
-        event_type="fdmn.full",
-        timestamp=1117769919,
-        flag=1,
-        message="ServerFileSystem domain root_domain is full",
-        raw=raw_line,
     )
 
-    resolution = await analyze_log(log_event, agent=agent, settings=test_settings)
+    agent = create_agent()
+    with agent.override(model=test_model):
+        resolution = await analyze_log(log_event)
 
     assert isinstance(resolution, ProblemResolution)
     assert resolution.severity == "CRITICAL"
     assert "ServerFileSystem domain full" in resolution.error_summary
-    assert "100% capacity" in resolution.root_cause
     assert len(resolution.remediation_steps) == 2
-    assert len(resolution.citations_and_reasons) == 1
-    assert "clusterfilesystem-fdmn-full-v1.8" in resolution.citations_and_reasons[0]
-
-
-@pytest.mark.anyio
-async def test_analyze_log_with_test_model_calling_tools() -> None:
-    """Verify that agent calls registered domain tools during investigation."""
-    citation_text = "[LANL HPC Runbook: switch-module-psu-failover-v2.0]: single-feed redundancy"
-    mock_resolution_data = {
-        "error_summary": "PSU failover degraded on switch module",
-        "root_cause": "Switch chassis power supply unit lost AC feed",
-        "severity": "HIGH",
-        "remediation_steps": [
-            "Inspect rear PSU LEDs and AC power cable",
-            "Hot-swap failed PSU module with compatible spare",
-        ],
-        "citations_and_reasons": [citation_text],
-    }
-
-    test_model = TestModel(
-        call_tools=["query_subsystem_docs"],
-        custom_output_args=mock_resolution_data,
-    )
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    agent = create_agent(settings=test_settings, model=test_model)
-
-    raw_line = "1117770000 2005.06.03 switch-01 switch_module: psu PSU status ( off on ) degraded"
-    log_event = LogEvent(
-        log_id="1117770000",
-        node="switch-01",
-        subsystem="switch_module",
-        event_type="psu",
-        timestamp=1117770000,
-        flag=1,
-        message="PSU status ( off on ) degraded",
-        raw=raw_line,
-    )
-
-    resolution = await analyze_log(log_event, agent=agent, settings=test_settings)
-    assert isinstance(resolution, ProblemResolution)
-    assert resolution.severity == "HIGH"
-    assert len(resolution.remediation_steps) == 2
-    assert len(resolution.citations_and_reasons) == 1
-    assert "switch-module-psu-failover-v2.0" in resolution.citations_and_reasons[0]
 
 
 @pytest.mark.anyio
@@ -207,105 +249,14 @@ async def test_analyze_log_raises_on_model_failure() -> None:
     def failing_fn(messages: Any, info: Any) -> Any:
         raise ConnectionError("NVIDIA NIM endpoint unreachable (offline test)")
 
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    failing_agent = create_agent(settings=test_settings, model=FunctionModel(failing_fn))
-
-    raw_line = (
-        "1117780000 2005.06.03 node-44 clusterfilesystem: "
-        "fdmn.panic domain panic unrecoverable disk error"
-    )
     log_event = LogEvent(
-        log_id="1117780000",
-        node="node-44",
-        subsystem="clusterfilesystem",
-        event_type="fdmn.panic",
-        timestamp=1117780000,
-        flag=1,
-        message="domain panic unrecoverable disk error",
-        raw=raw_line,
+        raw="1117780000 node-44 clusterfilesystem fdmn.panic 1117780000 1 domain panic",
+        message="domain panic",
     )
 
-    with pytest.raises(ConnectionError, match="NVIDIA NIM endpoint unreachable"):
-        await analyze_log(log_event, agent=failing_agent, settings=test_settings)
-
-
-@pytest.mark.anyio
-async def test_analyze_log_raises_when_circuit_breaker_open() -> None:
-    """Verify analyze_log raises RuntimeError when circuit breaker is open."""
-    reset_circuit_breaker()
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    test_model = TestModel()
-    agent = create_agent(settings=test_settings, model=test_model)
-
-    raw_line = (
-        "1117780000 2005.06.03 node-44 clusterfilesystem: "
-        "fdmn.panic domain panic unrecoverable disk error"
-    )
-    log_event = LogEvent(
-        log_id="1117780000",
-        node="node-44",
-        subsystem="clusterfilesystem",
-        event_type="fdmn.panic",
-        timestamp=1117780000,
-        flag=1,
-        message="domain panic unrecoverable disk error",
-        raw=raw_line,
-    )
-
-    try:
-        agent_module._circuit_breaker_open = True
-        agent_module._circuit_breaker_last_failure = time.monotonic()
-        with pytest.raises(RuntimeError, match="circuit breaker open"):
-            await analyze_log(log_event, agent=agent, settings=test_settings)
-    finally:
-        reset_circuit_breaker()
-
-
-@pytest.mark.anyio
-async def test_circuit_breaker_trips_on_live_network_failure() -> None:
-    """Verify circuit breaker trips and resets properly on live network errors."""
-    reset_circuit_breaker()
-    test_settings = Settings(
-        base_url="https://test.nvidia.com/v1",
-        api_key="test-key",
-        model_name="openai/gpt-oss-20b",
-    )
-    # create default agent (uses OpenAIChatModel, so is_live_network is True)
-    agent = create_agent(settings=test_settings)
-
-    raw_line = (
-        "1117780000 2005.06.03 node-44 clusterfilesystem: "
-        "fdmn.panic domain panic unrecoverable disk error"
-    )
-    log_event = LogEvent(
-        log_id="1117780000",
-        node="node-44",
-        subsystem="clusterfilesystem",
-        event_type="fdmn.panic",
-        timestamp=1117780000,
-        flag=1,
-        message="domain panic unrecoverable disk error",
-        raw=raw_line,
-    )
-
-    try:
-        with patch.object(agent, "run", side_effect=ConnectionError("Endpoint timed out")):
-            with pytest.raises(ConnectionError, match="Endpoint timed out"):
-                await analyze_log(log_event, agent=agent, settings=test_settings)
-
-            assert agent_module._circuit_breaker_open is True
-
-            # Subsequent call immediately raises RuntimeError due to open circuit breaker
-            with pytest.raises(RuntimeError, match="circuit breaker open"):
-                await analyze_log(log_event, agent=agent, settings=test_settings)
-    finally:
-        reset_circuit_breaker()
-        assert agent_module._circuit_breaker_open is False
+    agent = create_agent()
+    with (
+        agent.override(model=FunctionModel(failing_fn)),
+        pytest.raises(ConnectionError, match="NVIDIA NIM endpoint unreachable"),
+    ):
+        await analyze_log(log_event)

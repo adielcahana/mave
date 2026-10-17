@@ -1,5 +1,7 @@
 """Application settings loaded using pydantic-settings."""
 
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,13 +14,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    base_url: str
-    api_key: str
-    model_name: str = "openai/gpt-oss-20b"
-    rules_path: str = "rules/rules.json"
-    timeout: float = 30.0
+    base_url: str = "https://integrate.api.nvidia.com/v1"
+    api_key: str = "mock-offline-key"
+    model_name: str = "nvidia/nemotron-3-super-120b-a12b"
+    rules_path: str = "resources/rules.json"
+    timeout: float = 120.0
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return an instance of Settings."""
+    """Return the singleton Settings instance."""
     return Settings()
