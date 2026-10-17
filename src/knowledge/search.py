@@ -26,7 +26,7 @@ def _clean_html(raw_html: str) -> str:
     return html.unescape(no_tags).strip()
 
 
-def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
+async def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
     """Query DuckDuckGo HTML search for technical documentation and troubleshooting guides.
 
     Args:
@@ -41,12 +41,12 @@ def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
         return []
 
     try:
-        with httpx.Client(
+        async with httpx.AsyncClient(
             headers={"User-Agent": _USER_AGENT},
             timeout=8.0,
             follow_redirects=True,
         ) as client:
-            resp = client.post(
+            resp = await client.post(
                 "https://html.duckduckgo.com/html/",
                 data={"q": clean_q},
             )
@@ -83,11 +83,11 @@ def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
     return results
 
 
-def search_web_docs(query: str, max_results: int = 5) -> str:
+async def search_web_docs(query: str, max_results: int = 5) -> str:
     """Query external technical documentation and web troubleshooting guides via DuckDuckGo.
 
-    Use this tool ONLY when local documentation and cluster runbooks (via `query_subsystem_docs`
-    and `search_local_docs`) do not contain sufficient guidance for an incident.
+    Use this tool ONLY when local documentation and cluster runbooks (via `search_local_docs`
+    and `read_local_file`) do not contain sufficient guidance for an incident.
 
     Args:
         query: Specific search terms (e.g. 'lustre lnet configuration error',
@@ -101,7 +101,7 @@ def search_web_docs(query: str, max_results: int = 5) -> str:
     if not clean_q:
         return "Please provide a non-empty search query."
 
-    hits = search_web(clean_q, max_results=max_results)
+    hits = await search_web(clean_q, max_results=max_results)
     if not hits:
         return (
             f"No external web documentation or troubleshooting guides found for '{clean_q}'. "
@@ -120,10 +120,9 @@ def _parse_jq_filter(query: str) -> tuple[str, str] | None:
     """Extract (field_name, expected_value) from common jq filter expressions.
 
     Supports:
-      - select(.subsystem == "unix.hw")
-      - .subsystem == "unix.hw" or .subsystem="unix.hw"
-      - subsystem=unix.hw or subsystem="unix.hw"
+      - select(.scenario == "...")
       - .keywords[] == "panic" or .keywords == "panic"
+      - keywords=panic or scenario="..."
     """
     # Pattern: select(.field == "val") or .field == "val" or field="val"
     m = re.match(
@@ -242,9 +241,9 @@ def search_local_docs(
     - Structured JSON files (.json in resources/ and docs/):
       Executed as jq-style filter expressions or field matching.
       Supported query styles:
-        * jq filter expressions: e.g. `.subsystem == "unix.hw"`,
-          `select(.subsystem == "clusterfilesystem")`
-        * key=value filters: e.g. `subsystem=resourcemgmtdaeomon`, `keywords=panic`
+        * jq filter expressions: e.g. `.keywords[] == "panic"`,
+          `select(.scenario == "...")`
+        * key=value filters: e.g. `keywords=panic`, `keywords=err = 10`
         * jq field extraction: `.[].scenario`, `.root_cause`
         * keyword grep across records: scans all JSON fields for the query string/regex.
 
@@ -301,7 +300,7 @@ def search_local_docs(
     return "\n\n---\n\n".join(all_matches[:max_results])
 
 
-def search_external_knowledge(query: str) -> str:
+async def search_external_knowledge(query: str) -> str:
     """Composite knowledge search helper combining local doc search with web fallback."""
     local_res = search_local_docs(query)
     has_local_matches = not (
@@ -311,7 +310,7 @@ def search_external_knowledge(query: str) -> str:
     if has_local_matches:
         return f"### Local Documentation Matches:\n{local_res}"
 
-    web_res = search_web_docs(query)
+    web_res = await search_web_docs(query)
     return f"{local_res}\n\n---\n\n{web_res}"
 
 

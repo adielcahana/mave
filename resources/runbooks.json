@@ -1,6 +1,5 @@
 [
   {
-    "subsystem": "resourcemgmtdaeomon",
     "scenario": "Resource Management Daemon Subsystem Configuration Error (err = 10)",
     "root_cause": "The resource management daemon failed to parse or apply cluster configuration parameters (error code 10) during subsystem initialization. Common causes include corrupt /etc/resourcemgmt.conf, permission issues, or mismatched node maps.",
     "remediation_steps": [
@@ -11,17 +10,17 @@
     ],
     "citation": "[LANL HPC Runbook: resourcemgmt-config-err10-v1.4]",
     "keywords": [
+      "server",
+      "resourcemgmtdaeomon",
       "err = 10",
       "error 10",
       "config",
       "configure",
       "subsystem err",
       "err=10"
-    ],
-    "event_type": "server"
+    ]
   },
   {
-    "subsystem": "resourcemgmtdaeomon",
     "scenario": "Resource Management Node Controller Communication Timeout",
     "root_cause": "The master resource manager daemon timed out waiting for heartbeat or control responses from the node controller daemon. Caused by compute node kernel freeze, network interface congestion, or hung controller threads.",
     "remediation_steps": [
@@ -32,17 +31,16 @@
     ],
     "citation": "[LANL HPC Runbook: resourcemgmt-controller-timeout-v1.2]",
     "keywords": [
+      "resourcemgmtdaeomon",
       "timeout",
       "controller",
       "node controller",
       "heartbeat",
       "unresponsive",
       "hung"
-    ],
-    "event_type": "controller"
+    ]
   },
   {
-    "subsystem": "resourcemgmtdaeomon",
     "scenario": "Resource Management Daemon Startup Failure",
     "root_cause": "Daemon bootstrap aborted due to an unreleased port binding, stale IPC lockfile, exhausted system file descriptors, or missing shared memory segment.",
     "remediation_steps": [
@@ -53,17 +51,16 @@
     ],
     "citation": "[LANL HPC Runbook: resourcemgmt-daemon-startup-v1.1]",
     "keywords": [
+      "resourcemgmtdaeomon",
       "startup",
       "bootstrap",
       "daemon startup",
       "bind",
       "initialization failure",
       "abort"
-    ],
-    "event_type": "startup"
+    ]
   },
   {
-    "subsystem": "clusterfilesystem",
     "scenario": "ServerFileSystem domain panic (fdmn.panic)",
     "root_cause": "Critical filesystem metadata inconsistency, I/O barrier timeout, or unrecoverable disk block corruption triggering an emergency domain panic to protect data integrity.",
     "remediation_steps": [
@@ -74,16 +71,15 @@
     ],
     "citation": "[LANL HPC Runbook: clusterfilesystem-fdmn-panic-v2.1]",
     "keywords": [
+      "clusterfilesystem",
       "panic",
       "fdmn.panic",
       "domain panic",
       "panicked",
       "emergency panic"
-    ],
-    "event_type": "fdmn.panic"
+    ]
   },
   {
-    "subsystem": "clusterfilesystem",
     "scenario": "ServerFileSystem domain full (fdmn.full)",
     "root_cause": "Storage domain reached 100% capacity limit, preventing new block allocations and causing active HPC job I/O halts across compute clients.",
     "remediation_steps": [
@@ -94,17 +90,16 @@
     ],
     "citation": "[LANL HPC Runbook: clusterfilesystem-fdmn-full-v1.8]",
     "keywords": [
+      "clusterfilesystem",
       "full",
       "fdmn.full",
       "domain full",
       "capacity",
       "quota",
       "root_domain"
-    ],
-    "event_type": "fdmn.full"
+    ]
   },
   {
-    "subsystem": "clusterfilesystem",
     "scenario": "ClusterFileSystem Unserved Storage Domain (no server)",
     "root_cause": "Cluster filesystem cannot locate an active serving host or metadata server for the requested storage domain; primary metadata server node is down or SAN disconnected.",
     "remediation_steps": [
@@ -115,17 +110,16 @@
     ],
     "citation": "[LANL HPC Runbook: clusterfilesystem-unserved-domain-v2.0]",
     "keywords": [
+      "clusterfilesystem",
       "no server",
       "no_server",
       "unserved",
       "server for serverfilesystem",
       "missing server",
       "clusterfilesystem.no_server"
-    ],
-    "event_type": "clusterfilesystem.no_server"
+    ]
   },
   {
-    "subsystem": "clusterfilesystem",
     "scenario": "ClusterFileSystem Storage Domain Metadata Corruption",
     "root_cause": "Corrupted superblock, invalid inode B-tree pointers, or torn writes following an unexpected storage node power interruption or controller cache dump failure.",
     "remediation_steps": [
@@ -136,6 +130,7 @@
     ],
     "citation": "[LANL HPC Runbook: clusterfilesystem-metadata-corruption-v1.3]",
     "keywords": [
+      "clusterfilesystem",
       "metadata",
       "corruption",
       "corrupt",
@@ -143,11 +138,9 @@
       "superblock",
       "torn write",
       "btree"
-    ],
-    "event_type": "metadata"
+    ]
   },
   {
-    "subsystem": "unix.hw",
     "scenario": "Network Interface alt0 Down / Link Failure",
     "root_cause": "Physical Ethernet or InfiniBand link loss, optical transceiver failure, or carrier loss detected on primary cluster communication interface alt0.",
     "remediation_steps": [
@@ -158,17 +151,17 @@
     ],
     "citation": "[LANL HPC Runbook: unix-hw-alt0-down-v2.2]",
     "keywords": [
+      "net.down",
+      "unix.hw",
       "alt0",
       "interface down",
       "link down",
       "carrier",
       "nic",
       "interface alt0 is down"
-    ],
-    "event_type": "net.down"
+    ]
   },
   {
-    "subsystem": "unix.hw",
     "scenario": "Hardware Component State Change Unavailable",
     "root_cause": "Hardware inventory monitor detected a cluster component (PCIe adapter, SCSI disk, or controller) transitioned to unavailable state due to bus timeout or hardware fault.",
     "remediation_steps": [
@@ -179,17 +172,16 @@
     ],
     "citation": "[LANL HPC Runbook: unix-hw-state-change-v1.5]",
     "keywords": [
+      "unix.hw",
       "unavailable",
       "state change",
       "state_change.unavailable",
       "hwid",
       "component",
       "unavailable state"
-    ],
-    "event_type": "state_change.unavailable"
+    ]
   },
   {
-    "subsystem": "unix.hw",
     "scenario": "Memory Subsystem ECC Corrections / Multi-Bit Faults",
     "root_cause": "Compute node memory controller detected repeated single-bit ECC corrections exceeding rate threshold, or an uncorrectable multi-bit ECC error indicating physical DIMM degradation.",
     "remediation_steps": [
@@ -200,6 +192,7 @@
     ],
     "citation": "[LANL HPC Runbook: unix-hw-memory-ecc-v1.1]",
     "keywords": [
+      "unix.hw",
       "ecc",
       "memory ecc",
       "dimm",
@@ -207,11 +200,9 @@
       "multi-bit",
       "edac",
       "memory correction"
-    ],
-    "event_type": "ecc"
+    ]
   },
   {
-    "subsystem": "switch_module",
     "scenario": "Interconnect Switch Power Supply Unit (PSU) Failover / Degraded",
     "root_cause": "Switch chassis power supply unit lost AC input feed or suffered internal rectifier fault, operating in degraded single-feed redundancy (off on / on off).",
     "remediation_steps": [
@@ -222,6 +213,7 @@
     ],
     "citation": "[LANL HPC Runbook: switch-module-psu-failover-v2.0]",
     "keywords": [
+      "switch_module",
       "psu",
       "power supply",
       "off on",
@@ -229,11 +221,9 @@
       "degraded power",
       "rectifier",
       "psu status"
-    ],
-    "event_type": "psu"
+    ]
   },
   {
-    "subsystem": "switch_module",
     "scenario": "Switch Module Temperature Threshold Exceeded / Overheat",
     "root_cause": "Internal switch chassis temperature exceeded thermal threshold due to cooling fan degradation, filter blockage, or rack airflow stagnation.",
     "remediation_steps": [
@@ -244,6 +234,7 @@
     ],
     "citation": "[LANL HPC Runbook: switch-module-temperature-overheat-v1.7]",
     "keywords": [
+      "switch_module",
       "temperature",
       "temphigh",
       "overheat",
@@ -252,11 +243,9 @@
       "fan speeds",
       "warning threshold",
       "exceeds warning threshold"
-    ],
-    "event_type": "temphigh"
+    ]
   },
   {
-    "subsystem": "switch_module",
     "scenario": "Switch Module Link Flapping and Broadcast Link Errors",
     "root_cause": "Interconnect switch port experiencing physical signal attenuation, bad optical termination, or repeated reset cycles on broadcast tree.",
     "remediation_steps": [
@@ -267,6 +256,7 @@
     ],
     "citation": "[LANL HPC Runbook: switch-module-link-flapping-v1.6]",
     "keywords": [
+      "switch_module",
       "flapping",
       "link error",
       "bcast-error",
@@ -274,11 +264,9 @@
       "broadcast tree",
       "link in reset",
       "link"
-    ],
-    "event_type": "bcast-error"
+    ]
   },
   {
-    "subsystem": "boot_cmd",
     "scenario": "Boot Command Error: CMF-Port Disconnected",
     "root_cause": "Boot command rejected because the Connection Management Facility (CMF) management port for the target node is disconnected or unresponsive.",
     "remediation_steps": [
@@ -289,17 +277,17 @@
     ],
     "citation": "[LANL HPC Runbook: boot-cmd-cmf-port-disconnect-v2.1]",
     "keywords": [
+      "error",
+      "boot_cmd",
       "cmf-port",
       "cmf",
       "port is not connected",
       "port disconnected",
       "management port",
       "cmf-port this node"
-    ],
-    "event_type": "error"
+    ]
   },
   {
-    "subsystem": "boot_cmd",
     "scenario": "Boot Command Aborted / Node State Determination Error",
     "root_cause": "Boot management controller could not determine target node hardware/firmware state, triggering automated boot command abort across target partitions.",
     "remediation_steps": [
@@ -310,17 +298,16 @@
     ],
     "citation": "[LANL HPC Runbook: boot-cmd-state-determination-v1.4]",
     "keywords": [
+      "boot_cmd",
       "abort",
       "command failed",
       "state determination",
       "command has been aborted",
       "node state",
       "aborted"
-    ],
-    "event_type": "abort"
+    ]
   },
   {
-    "subsystem": "boot_cmd",
     "scenario": "Boot Command Failed: Console Busy / Timeout Waiting for SRM Prompt",
     "root_cause": "Node serial console is locked by another operator session or firmware hung before yielding the SRM console prompt during halt/boot cycle.",
     "remediation_steps": [
@@ -331,12 +318,13 @@
     ],
     "citation": "[LANL HPC Runbook: boot-cmd-console-busy-v1.3]",
     "keywords": [
+      "error",
+      "boot_cmd",
       "console busy",
       "srm prompt",
       "timeout waiting for srm",
       "console",
       "prompt timeout"
-    ],
-    "event_type": "error"
+    ]
   }
 ]

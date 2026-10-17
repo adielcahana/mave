@@ -7,8 +7,6 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 
 from src.rules.engine import RuleTreeEngine
-from src.rules.normalizer import parse_log_line
-from src.rules.telemetry_filter import TelemetryFilter
 
 __all__ = [
     "BenchmarkMetrics",
@@ -28,14 +26,12 @@ class GoldenLogEntry(BaseModel):
         description="Whether log represents an actionable incident",
     )
     expected_severity: str = Field(default="INFO", description="Expected incident severity")
-    expected_subsystem: str = Field(default="", description="Expected subsystem identifier")
     category: str = Field(default="", description="Specific failure or telemetry category")
 
     @model_validator(mode="before")
     @classmethod
     def _normalize_keys(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            # Backwards-compatibility alias: is_error -> is_actionable
             if "is_actionable" not in data and "is_error" in data:
                 data["is_actionable"] = data["is_error"]
         return data
@@ -85,12 +81,12 @@ def evaluate_benchmark(
 ) -> BenchmarkMetrics:
     """Evaluate triage accuracy and fast-path resolution across the golden benchmark.
 
-    Evaluates log stream triage deterministically:
-    1. Parses raw log lines via `parse_log_line`.
-    2. Runs wire-speed `TelemetryFilter`. If identified as routine telemetry,
-       the log is filtered (predicted `is_actionable = False`).
-    3. If non-telemetry, tests `RuleTreeEngine.match`. If matched, registers a fast-path
-       hit; otherwise registers an agent fallback (both predicted `is_actionable = True`).
+    Evaluates log stream triage deterministically via the unified RuleTreeEngine:
+    1. Matches raw log lines against `RuleTreeEngine.match` (Parent Envelope -> Child Rule).
+    2. If matched rule has `rule_type == 'BENIGN_TELEMETRY'`, the log is filtered
+       (predicted `is_actionable = False`).
+    3. Otherwise, if a child rule with a resolution matched, registers a fast-path hit;
+       if no child rule matched, registers an agent fallback (both `is_actionable = True`).
     4. Computes Precision, Recall, F1, Accuracy, and confusion counts.
     """
     path = Path(benchmark_path)
@@ -117,16 +113,13 @@ def evaluate_benchmark(
     agent_fallbacks = 0
 
     for entry in entries:
-        event = parse_log_line(entry.raw)
+        _event, matched_rule = engine.match(entry.raw)
 
-        # Wire-speed routine telemetry filtration
-        if TelemetryFilter.is_routine_telemetry(event):
+        if matched_rule is not None and matched_rule.rule_type == "BENIGN_TELEMETRY":
             telemetry_filtered += 1
             predicted_actionable = False
         else:
-            # Check fast-path rule tree match
-            rule_match = engine.match(event)
-            if rule_match is not None:
+            if matched_rule is not None and matched_rule.resolution is not None:
                 fast_path_hits += 1
             else:
                 agent_fallbacks += 1

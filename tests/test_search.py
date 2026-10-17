@@ -1,10 +1,13 @@
-"""Tests for local documentation (grep/jq) and web search tools."""
+"""Tests for local documentation (grep/jq) and async web search tools."""
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.knowledge.search import (
+    read_local_file,
     search_external_knowledge,
     search_local_docs,
     search_web,
@@ -26,11 +29,9 @@ def test_search_local_docs_grep_text(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    # Grep-like search by keyword
     output = search_local_docs("slurmctld", search_paths=[docs_dir])
     assert "slurm.md:3: If the slurmctld controller daemon is unresponsive" in output
 
-    # Grep regex search
     regex_out = search_local_docs(r"systemctl\s+restart", search_paths=[docs_dir])
     assert "slurm.md:4: Restart the service using systemctl restart slurmctld." in regex_out
 
@@ -43,45 +44,38 @@ def test_search_local_docs_jq_json(tmp_path: Path) -> None:
     runbooks_file = res_dir / "runbooks.json"
     runbooks_data = [
         {
-            "subsystem": "unix.hw",
             "scenario": "Network interface alt0 down",
             "root_cause": "NIFF heartbeat lost on interface alt0",
             "remediation_steps": ["Check physical cable seating", "Run ifconfig alt0 up"],
-            "keywords": ["alt0", "down", "niff"],
+            "keywords": ["unix.hw", "alt0", "down", "niff"],
         },
         {
-            "subsystem": "clusterfilesystem",
             "scenario": "Domain panic on volume /data",
             "root_cause": "AdvFS metadata corruption halts I/O",
             "remediation_steps": ["Unmount volume", "Run advfsck"],
-            "keywords": ["panic", "advfs", "corruption"],
+            "keywords": ["clusterfilesystem", "panic", "advfs", "corruption"],
         },
     ]
     runbooks_file.write_text(json.dumps(runbooks_data), encoding="utf-8")
 
-    # JQ filter style: .subsystem == "unix.hw"
-    jq_out = search_local_docs('.subsystem == "unix.hw"', search_paths=[res_dir])
+    jq_out = search_local_docs('.keywords[] == "unix.hw"', search_paths=[res_dir])
     assert "Network interface alt0 down" in jq_out
     assert "unix.hw" in jq_out
     assert "AdvFS" not in jq_out
 
-    # JQ filter style: select(.subsystem == "clusterfilesystem")
     select_out = search_local_docs(
-        'select(.subsystem == "clusterfilesystem")',
+        'select(.scenario == "Domain panic on volume /data")',
         search_paths=[res_dir],
     )
     assert "Domain panic on volume /data" in select_out
     assert "advfsck" in select_out
 
-    # Key=value filter style
-    kv_out = search_local_docs("subsystem=unix.hw", search_paths=[res_dir])
+    kv_out = search_local_docs("keywords=unix.hw", search_paths=[res_dir])
     assert "Network interface alt0 down" in kv_out
 
-    # JQ keyword array filter
     kw_out = search_local_docs('.keywords[] == "panic"', search_paths=[res_dir])
     assert "Domain panic on volume /data" in kw_out
 
-    # JQ field projection: .scenario
     proj_out = search_local_docs(".scenario", search_paths=[res_dir])
     assert "Network interface alt0 down" in proj_out
     assert "Domain panic on volume /data" in proj_out
@@ -98,19 +92,22 @@ def test_search_local_docs_empty_and_no_match(tmp_path: Path) -> None:
     assert "No documentation or knowledge files found" in no_match_out or "No local" in no_match_out
 
 
-def test_search_web_docs_formatting() -> None:
-    """Verify search_web_docs formats search results into markdown."""
+@pytest.mark.anyio
+async def test_search_web_docs_formatting() -> None:
+    """Verify search_web_docs formats async search results into markdown."""
     with patch(
         "src.knowledge.search.search_web",
-        return_value=[
-            {
-                "title": "Slurm Troubleshooting Guide",
-                "snippet": "Resolving node draining and controller deadlocks.",
-                "url": "https://slurm.schedmd.com/troubleshoot.html",
-            }
-        ],
+        new=AsyncMock(
+            return_value=[
+                {
+                    "title": "Slurm Troubleshooting Guide",
+                    "snippet": "Resolving node draining and controller deadlocks.",
+                    "url": "https://slurm.schedmd.com/troubleshoot.html",
+                }
+            ]
+        ),
     ):
-        output = search_web_docs("slurm deadlock")
+        output = await search_web_docs("slurm deadlock")
 
     assert "### Web Search Results for 'slurm deadlock':" in output
     assert "**Title:** Slurm Troubleshooting Guide" in output
@@ -118,15 +115,17 @@ def test_search_web_docs_formatting() -> None:
     assert "controller deadlocks" in output
 
 
-def test_search_web_docs_no_results() -> None:
+@pytest.mark.anyio
+async def test_search_web_docs_no_results() -> None:
     """Verify search_web_docs handles empty results gracefully."""
-    with patch("src.knowledge.search.search_web", return_value=[]):
-        output = search_web_docs("completely_nonexistent_hpc_error_xyz")
+    with patch("src.knowledge.search.search_web", new=AsyncMock(return_value=[])):
+        output = await search_web_docs("completely_nonexistent_hpc_error_xyz")
     assert "No external web documentation" in output
 
 
-def test_search_web_parses_html() -> None:
-    """Verify search_web extracts title, snippet, and url from mock DuckDuckGo HTML."""
+@pytest.mark.anyio
+async def test_search_web_parses_html() -> None:
+    """Verify async search_web extracts title, snippet, and url from mock DuckDuckGo HTML."""
     mock_html = (
         "<html><body>"
         '<h2 class="result__title"><a href="https://example.com/guide">'
@@ -141,8 +140,8 @@ def test_search_web_parses_html() -> None:
     mock_resp.status_code = 200
     mock_resp.text = mock_html
 
-    with patch("httpx.Client.post", return_value=mock_resp):
-        hits = search_web("slurm freeze", max_results=3)
+    with patch("httpx.AsyncClient.post", new=AsyncMock(return_value=mock_resp)):
+        hits = await search_web("slurm freeze", max_results=3)
 
     assert len(hits) == 1
     assert hits[0]["title"] == "Slurm Troubleshooting Guide"
@@ -150,30 +149,39 @@ def test_search_web_parses_html() -> None:
     assert hits[0]["url"] == "https://example.com/guide"
 
 
-def test_search_web_handles_network_error() -> None:
+@pytest.mark.anyio
+async def test_search_web_handles_network_error() -> None:
     """Verify search_web gracefully handles network exceptions."""
-    with patch("httpx.Client.post", side_effect=RuntimeError("Network timeout")):
-        hits = search_web("network error test")
+    with patch(
+        "httpx.AsyncClient.post",
+        new=AsyncMock(side_effect=RuntimeError("Network timeout")),
+    ):
+        hits = await search_web("network error test")
     assert hits == []
 
 
-def test_search_external_knowledge_composite(tmp_path: Path) -> None:
+@pytest.mark.anyio
+async def test_search_external_knowledge_composite(tmp_path: Path) -> None:
     """Verify search_external_knowledge falls back to web if local has no hits."""
     empty_dir = tmp_path / "empty_docs"
     empty_dir.mkdir()
 
-    with patch("src.knowledge.search._DEFAULT_SEARCH_PATHS", [empty_dir]):
-        with patch(
+    with (
+        patch("src.knowledge.search._DEFAULT_SEARCH_PATHS", [empty_dir]),
+        patch(
             "src.knowledge.search.search_web",
-            return_value=[
-                {
-                    "title": "Mellanox InfiniBand Architecture",
-                    "snippet": "Troubleshooting physical layer symbol errors.",
-                    "url": "https://mellanox.com/ib",
-                }
-            ],
-        ):
-            output = search_external_knowledge("InfiniBand symbol error")
+            new=AsyncMock(
+                return_value=[
+                    {
+                        "title": "Mellanox InfiniBand Architecture",
+                        "snippet": "Troubleshooting physical layer symbol errors.",
+                        "url": "https://mellanox.com/ib",
+                    }
+                ]
+            ),
+        ),
+    ):
+        output = await search_external_knowledge("InfiniBand symbol error")
 
     assert "Web Search Results" in output
     assert "Mellanox InfiniBand" in output
@@ -181,8 +189,6 @@ def test_search_external_knowledge_composite(tmp_path: Path) -> None:
 
 def test_read_local_file_with_line_numbers(tmp_path: Path) -> None:
     """Verify read_local_file outputs line-numbered slices correctly."""
-    from src.knowledge.search import read_local_file
-
     test_file = tmp_path / "guide.md"
     content = "\n".join(f"Line {i} content text" for i in range(1, 11))
     test_file.write_text(content, encoding="utf-8")
@@ -199,8 +205,6 @@ def test_read_local_file_with_line_numbers(tmp_path: Path) -> None:
 
 def test_read_local_file_not_found_and_errors() -> None:
     """Verify read_local_file handles missing files and empty path."""
-    from src.knowledge.search import read_local_file
-
     out_missing = read_local_file("completely_missing_file_xyz.md")
     assert "File not found" in out_missing
 
@@ -210,8 +214,6 @@ def test_read_local_file_not_found_and_errors() -> None:
 
 def test_read_local_file_out_of_bounds_and_empty(tmp_path: Path) -> None:
     """Verify read_local_file handles out-of-bounds start lines and empty files."""
-    from src.knowledge.search import read_local_file
-
     empty_f = tmp_path / "empty.txt"
     empty_f.write_text("", encoding="utf-8")
     assert "Empty file" in read_local_file(str(empty_f))

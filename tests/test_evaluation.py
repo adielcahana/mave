@@ -53,9 +53,8 @@ def test_golden_dataset_structure(golden_eval_path: Path):
     assert isinstance(data, list)
     assert len(data) == 150, f"Expected exactly 150 entries, found {len(data)}"
 
-    required_keys = {"raw", "is_actionable", "expected_severity", "expected_subsystem", "category"}
+    required_keys = {"raw", "is_actionable", "expected_severity", "category"}
     categories = set()
-    subsystems = set()
     severities = set()
     actionable_count = 0
     non_actionable_count = 0
@@ -64,15 +63,14 @@ def test_golden_dataset_structure(golden_eval_path: Path):
         assert isinstance(entry, dict), f"Entry {idx} is not a dict"
         missing = required_keys - set(entry.keys())
         assert not missing, f"Entry {idx} missing keys: {missing}"
+        assert "expected_subsystem" not in entry
 
         assert isinstance(entry["raw"], str) and len(entry["raw"].strip()) > 0
         assert isinstance(entry["is_actionable"], bool)
         assert isinstance(entry["expected_severity"], str)
-        assert isinstance(entry["expected_subsystem"], str)
         assert isinstance(entry["category"], str)
 
         categories.add(entry["category"])
-        subsystems.add(entry["expected_subsystem"])
         severities.add(entry["expected_severity"])
 
         if entry["is_actionable"]:
@@ -82,16 +80,6 @@ def test_golden_dataset_structure(golden_eval_path: Path):
 
     # Diverse categories across routine telemetry and failure modes
     assert len(categories) >= 10, f"Expected at least 10 categories, found {len(categories)}"
-    # Covers all 5 LANL subsystems
-    lanl_subsystems = {
-        "resourcemgmtdaeomon",
-        "clusterfilesystem",
-        "unix.hw",
-        "switch_module",
-        "boot_cmd",
-    }
-    missing_subsystems = lanl_subsystems - subsystems
-    assert lanl_subsystems.issubset(subsystems), f"Missing subsystems: {missing_subsystems}"
     # Balanced mix of actionable and non-actionable
     assert actionable_count > 0 and non_actionable_count > 0
     assert abs(actionable_count - non_actionable_count) <= 20
@@ -138,12 +126,12 @@ def test_golden_log_entry_alias_is_error():
 
 
 def test_evaluate_benchmark_empty_engine(golden_eval_path: Path):
-    """Verify evaluate_benchmark with empty rule engine routes all non-telemetry to fallback."""
+    """Verify evaluate_benchmark with empty rule engine routes all logs to agent fallback."""
     empty_engine = RuleTreeEngine()
     metrics = evaluate_benchmark(golden_eval_path, rule_engine=empty_engine)
     assert metrics.fast_path_hits == 0
-    assert metrics.agent_fallbacks == 75
-    assert metrics.telemetry_filtered == 75
+    assert metrics.telemetry_filtered == 0
+    assert metrics.agent_fallbacks == 150
 
 
 def test_evaluate_benchmark_missing_file():
