@@ -1,7 +1,9 @@
 [
   {
+    "runbook_id": "RB-1f952f7c",
     "scenario": "Resource Management Daemon Subsystem Configuration Error (err = 10)",
     "root_cause": "The resource management daemon failed to parse or apply cluster configuration parameters (error code 10) during subsystem initialization. Common causes include corrupt /etc/resourcemgmt.conf, permission issues, or mismatched node maps.",
+    "severity": "CRITICAL",
     "remediation_steps": [
       "Verify syntax and permissions of /etc/resourcemgmt.conf and node allocation tables.",
       "Verify node controller socket connectivity and resource daemon read access.",
@@ -21,8 +23,10 @@
     ]
   },
   {
+    "runbook_id": "RB-e8e0a448",
     "scenario": "Resource Management Node Controller Communication Timeout",
     "root_cause": "The master resource manager daemon timed out waiting for heartbeat or control responses from the node controller daemon. Caused by compute node kernel freeze, network interface congestion, or hung controller threads.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Ping target node controller over management network to verify IP reachability.",
       "Check node controller daemon status and CPU/memory load on target compute node.",
@@ -41,8 +45,10 @@
     ]
   },
   {
+    "runbook_id": "RB-92847f79",
     "scenario": "Resource Management Daemon Startup Failure",
     "root_cause": "Daemon bootstrap aborted due to an unreleased port binding, stale IPC lockfile, exhausted system file descriptors, or missing shared memory segment.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Inspect /var/log/resourcemgmt.log for socket bind errors or permission failures.",
       "Clear stale lockfiles (/var/run/resourcemgmt.pid) and unreleased IPC shared memory segments (`ipcrm`).",
@@ -61,8 +67,10 @@
     ]
   },
   {
+    "runbook_id": "RB-952c543b",
     "scenario": "ServerFileSystem domain panic (fdmn.panic)",
     "root_cause": "Critical filesystem metadata inconsistency, I/O barrier timeout, or unrecoverable disk block corruption triggering an emergency domain panic to protect data integrity.",
+    "severity": "CRITICAL",
     "remediation_steps": [
       "Immediately quarantine and unmount affected storage domain to halt write cascading.",
       "Inspect storage fabric, SAN switches, and controller target connectivity.",
@@ -80,8 +88,10 @@
     ]
   },
   {
+    "runbook_id": "RB-947c693e",
     "scenario": "ServerFileSystem domain full (fdmn.full)",
     "root_cause": "Storage domain reached 100% capacity limit, preventing new block allocations and causing active HPC job I/O halts across compute clients.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Identify large consumer accounts and active jobs writing to the affected domain.",
       "Purge expired scratch files, temporary core dumps, and staging caches.",
@@ -100,8 +110,10 @@
     ]
   },
   {
+    "runbook_id": "RB-18581aae",
     "scenario": "ClusterFileSystem Unserved Storage Domain (no server)",
     "root_cause": "Cluster filesystem cannot locate an active serving host or metadata server for the requested storage domain; primary metadata server node is down or SAN disconnected.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Identify designated primary and secondary metadata server nodes for the domain.",
       "Verify cluster filesystem daemon status and SAN interconnect on serving nodes.",
@@ -120,8 +132,10 @@
     ]
   },
   {
+    "runbook_id": "RB-7bbc8eb7",
     "scenario": "ClusterFileSystem Storage Domain Metadata Corruption",
     "root_cause": "Corrupted superblock, invalid inode B-tree pointers, or torn writes following an unexpected storage node power interruption or controller cache dump failure.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Set storage domain to read-only mode to prevent write amplification of corruption.",
       "Extract filesystem event journal logs to locate damaged directory blocks.",
@@ -141,8 +155,10 @@
     ]
   },
   {
+    "runbook_id": "RB-2f451138",
     "scenario": "Network Interface alt0 Down / Link Failure",
     "root_cause": "Physical Ethernet or InfiniBand link loss, optical transceiver failure, or carrier loss detected on primary cluster communication interface alt0.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Verify physical patch cable seating and check link LEDs on switch port and host NIC.",
       "Restart network interface: `ifconfig alt0 down && ifconfig alt0 up`.",
@@ -162,8 +178,10 @@
     ]
   },
   {
+    "runbook_id": "RB-bdaa86c9",
     "scenario": "Hardware Component State Change Unavailable",
     "root_cause": "Hardware inventory monitor detected a cluster component (PCIe adapter, SCSI disk, or controller) transitioned to unavailable state due to bus timeout or hardware fault.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Query hardware inventory with component HWID to identify the failing physical device.",
       "Check IPMI system event logs (SEL) and sensor health for power/thermal anomalies.",
@@ -182,8 +200,10 @@
     ]
   },
   {
+    "runbook_id": "RB-c26dd782",
     "scenario": "Memory Subsystem ECC Corrections / Multi-Bit Faults",
     "root_cause": "Compute node memory controller detected repeated single-bit ECC corrections exceeding rate threshold, or an uncorrectable multi-bit ECC error indicating physical DIMM degradation.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Extract memory controller EDAC logs (`edac-util -v`) to isolate failing DIMM socket.",
       "Assess error frequency: if correctable error rate exceeds threshold, schedule preventative replacement.",
@@ -203,8 +223,10 @@
     ]
   },
   {
-    "scenario": "Interconnect Switch Power Supply Unit (PSU) Failover / Degraded",
+    "runbook_id": "RB-6a3c0815",
+    "scenario": "Interconnect Switch PSU failure / failover (Power Supply Unit Degraded)",
     "root_cause": "Switch chassis power supply unit lost AC input feed or suffered internal rectifier fault, operating in degraded single-feed redundancy (off on / on off).",
+    "severity": "HIGH",
     "remediation_steps": [
       "Inspect switch chassis rear PSU status LEDs and verify AC power cable connection.",
       "Confirm redundant PSU successfully maintained switch backplane power without loss.",
@@ -224,8 +246,10 @@
     ]
   },
   {
+    "runbook_id": "RB-782c5346",
     "scenario": "Switch Module Temperature Threshold Exceeded / Overheat",
     "root_cause": "Internal switch chassis temperature exceeded thermal threshold due to cooling fan degradation, filter blockage, or rack airflow stagnation.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Check switch chassis fan RPM telemetry (`Fan speeds`) to isolate stalled fans.",
       "Inspect rack air baffles and clean perforated intake filters to restore airflow.",
@@ -246,8 +270,10 @@
     ]
   },
   {
+    "runbook_id": "RB-cde96f56",
     "scenario": "Switch Module Link Flapping and Broadcast Link Errors",
     "root_cause": "Interconnect switch port experiencing physical signal attenuation, bad optical termination, or repeated reset cycles on broadcast tree.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Identify the flapping port or broadcast tree ID (e.g. `Interconnect-0T00:00:2:1`).",
       "Inspect fiber optic connectors for dirt; clean and reseat transceiver optics.",
@@ -267,8 +293,10 @@
     ]
   },
   {
+    "runbook_id": "RB-3e735979",
     "scenario": "Boot Command Error: CMF-Port Disconnected",
     "root_cause": "Boot command rejected because the Connection Management Facility (CMF) management port for the target node is disconnected or unresponsive.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Verify physical CMF management cabling between compute node and console server.",
       "Inspect terminal server switch port activity LED and CMF management link status.",
@@ -288,8 +316,10 @@
     ]
   },
   {
+    "runbook_id": "RB-30b61788",
     "scenario": "Boot Command Aborted / Node State Determination Error",
     "root_cause": "Boot management controller could not determine target node hardware/firmware state, triggering automated boot command abort across target partitions.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Query out-of-band interface (BMC/IPMI) for node power status and POST code.",
       "Issue explicit halt command to reset node state into deterministic SRM prompt.",
@@ -308,8 +338,10 @@
     ]
   },
   {
+    "runbook_id": "RB-5305426a",
     "scenario": "Boot Command Failed: Console Busy / Timeout Waiting for SRM Prompt",
     "root_cause": "Node serial console is locked by another operator session or firmware hung before yielding the SRM console prompt during halt/boot cycle.",
+    "severity": "HIGH",
     "remediation_steps": [
       "Identify and terminate orphaned console connections attached to the target node.",
       "Transmit console break sequence (~. or break signal) to regain console control.",

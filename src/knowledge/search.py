@@ -17,7 +17,7 @@ __all__ = [
     "search_web_docs",
 ]
 
-_DEFAULT_SEARCH_PATHS = [Path("docs"), Path("resources")]
+_DEFAULT_SEARCH_PATHS = [Path("resources/runbooks.json")]
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"
 
 
@@ -256,13 +256,10 @@ def search_local_docs(
     max_results: int = 5,
     search_paths: list[Path | str] | None = None,
 ) -> str:
-    """Search local documentation and cluster knowledge files using grep-like and jq-like queries.
+    """Search local cluster runbooks (`resources/runbooks.json`) using jq-like or keyword queries.
 
     Search Execution Mechanism:
-    - Text/Markdown files (.md, .txt, .rst, .log in docs/):
-      Executed as a grep-style regex/keyword scan line-by-line across files,
-      returning matching line numbers and excerpts.
-    - Structured JSON files (.json in resources/ and docs/):
+    - Structured JSON runbooks (`resources/runbooks.json`):
       Executed as jq-style filter expressions or field matching.
       Supported query styles:
         * jq filter expressions: e.g. `.keywords[] == "panic"`,
@@ -274,14 +271,14 @@ def search_local_docs(
     Always run `search_local_docs` first before escalating to web search.
 
     Args:
-        query: Grep regex pattern for text files, or jq filter/field expression for JSON files.
-        file_pattern: Optional glob to target specific files (e.g. '*.md', '*.json').
+        query: jq filter/field expression or keyword/regex pattern.
+        file_pattern: Optional glob to target specific files (default '*').
         max_results: Maximum number of matching entries to return.
         search_paths: Optional list of directories or files to search.
-            Defaults to docs/ and resources/.
+            Defaults to `resources/runbooks.json`.
 
     Returns:
-        Formatted excerpts and matching records with file paths and line numbers.
+        Formatted excerpts and matching runbook records.
     """
     clean_q = query.strip()
     if not clean_q:
@@ -300,7 +297,7 @@ def search_local_docs(
 
     all_matches: list[str] = []
     for file_path in sorted(collected_files):
-        if not file_path.is_file():
+        if not file_path.is_file() or file_path.name == "rules.json":
             continue
 
         ext = file_path.suffix.lower()
@@ -317,8 +314,8 @@ def search_local_docs(
     if not all_matches:
         return (
             f"No local documentation or runbook matches found for '{clean_q}'. "
-            f"Executed search via grep across text/markdown files and jq on JSON runbooks/rules. "
-            f"If local documentation is exhausted, escalate to `search_web_docs`."
+            f"Executed search on local runbooks. "
+            f"If local runbooks are exhausted, escalate to `search_web_docs`."
         )
 
     return "\n\n---\n\n".join(all_matches[:max_results])
@@ -344,14 +341,13 @@ def read_local_file(
     end_line: int | None = None,
     max_lines: int = 100,
 ) -> str:
-    """Read a local documentation or knowledge file with 1-based line numbers.
+    """Read a local runbook file with 1-based line numbers.
 
-    Use this tool as a follow-up to `search_local_docs` to inspect surrounding context,
-    detailed remediation instructions, or specific sections around matched lines.
+    Use this tool as a follow-up to `search_local_docs` to inspect surrounding context
+    or specific sections around matched entries.
 
     Args:
-        file_path: Relative or absolute path to the file (e.g. 'docs/slurm.md',
-            'resources/runbooks.json', 'resources/rules.json').
+        file_path: Relative or absolute path to the file (e.g. 'resources/runbooks.json').
         start_line: First line to read (1-based, inclusive, defaults to 1).
         end_line: Last line to read (1-based, inclusive). If omitted, reads up to
             max_lines starting from start_line.
@@ -367,7 +363,7 @@ def read_local_file(
 
     target = Path(clean_p)
     if not target.is_file():
-        for prefix in [Path("docs"), Path("resources")]:
+        for prefix in [Path("resources")]:
             candidate = prefix / clean_p
             if candidate.is_file():
                 target = candidate

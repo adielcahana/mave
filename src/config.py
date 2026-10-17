@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     api_key: str = "mock-offline-key"
     model_name: str = "nvidia/nemotron-3-super-120b-a12b"
     rules_path: str = "resources/rules.json"
+    runbooks_path: str = "resources/runbooks.json"
     timeout: float = 120.0
 
 

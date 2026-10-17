@@ -3,7 +3,7 @@
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 ValidationStatus = Literal["PENDING", "VALIDATED", "REJECTED"]
 RuleType = Literal["ACTIONABLE_ERROR", "BENIGN_TELEMETRY"]
@@ -68,9 +68,14 @@ class Rule(BaseModel):
         default="ACTIONABLE_ERROR",
         description="Rule classification: 'ACTIONABLE_ERROR' or 'BENIGN_TELEMETRY'",
     )
+    runbook_id: str | None = Field(
+        default=None,
+        description="ID of the associated RunbookEntry in resources/runbooks.json",
+    )
     resolution: ProblemResolution | None = Field(
         default=None,
-        description="ProblemResolution payload returned upon match",
+        exclude=True,
+        description="In-memory ProblemResolution resolved via runbook_id",
     )
     human_validated: bool = Field(
         default=False,
@@ -82,6 +87,35 @@ class Rule(BaseModel):
     )
 
     _compiled: re.Pattern[str] | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def _resolve_from_runbook(self) -> "Rule":
+        if self.resolution is None and self.runbook_id:
+            from src.knowledge.docs_db import get_runbook_by_id
+
+            rb = get_runbook_by_id(self.runbook_id)
+            if rb is not None:
+                self.resolution = rb.to_problem_resolution()
+        elif self.resolution is not None and not self.runbook_id and not self.resolution.is_benign:
+            from src.knowledge.docs_db import RunbookEntry, _make_runbook_id, add_runbook_entry
+
+            scenario = self.resolution.error_summary or "Cluster Incident"
+            citation = (
+                self.resolution.citations_and_reasons[0]
+                if self.resolution.citations_and_reasons
+                else "[LANL HPC Runbook: custom]"
+            )
+            rb_entry = RunbookEntry(
+                runbook_id=_make_runbook_id(scenario),
+                scenario=scenario,
+                root_cause=self.resolution.root_cause,
+                severity=self.resolution.severity or "HIGH",
+                remediation_steps=tuple(self.resolution.remediation_steps),
+                citation=citation,
+            )
+            add_runbook_entry(rb_entry, persist=False)
+            self.runbook_id = rb_entry.runbook_id
+        return self
 
     def get_compiled_pattern(self) -> re.Pattern[str]:
         """Return or lazily compile the cached regex pattern."""

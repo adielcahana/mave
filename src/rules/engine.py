@@ -476,6 +476,7 @@ class RuleTreeEngine:
         rule_id: str | None = None,
         auto_validate_async: bool = True,
         parent_id: str | None = None,
+        runbook_id: str | None = None,
     ) -> Rule:
         """Synthesize and deduplicate ParentEnvelope and Child Rule from an agent resolution."""
         if isinstance(event, str):
@@ -605,6 +606,7 @@ class RuleTreeEngine:
             rule_id=rid,
             pattern=pattern,
             rule_type=rule_type,
+            runbook_id=None if resolution.is_benign else runbook_id,
             resolution=rule_res,
             human_validated=False,
             validation_status="PENDING",
