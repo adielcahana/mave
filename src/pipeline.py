@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from src.agent import analyze_log
 from src.config import Settings, get_settings
-from src.knowledge.docs_db import create_runbook_from_resolution
+from src.knowledge.docs_db import create_runbook_from_resolution, get_runbook_by_id
 from src.rules.engine import RuleTreeEngine
 from src.rules.models import LogEvent, ProblemResolution
 
@@ -45,9 +45,9 @@ class PipelineResult(BaseModel):
         default=None,
         description="Resolved remediation guidance if actionable",
     )
-    cost_usd: float = Field(
-        default=0.0,
-        description="Estimated LLM inference cost in USD",
+    from_llm: bool = Field(
+        default=False,
+        description="Whether this log event required LLM SRE agent escalation",
     )
     latency_ms: float = Field(
         default=0.0,
@@ -70,14 +70,57 @@ class LogProcessingStats:
     error_count: int = 0
     auto_annotated_count: int = 0
     llm_needed_count: int = 0
-    total_cost_usd: float = 0.0
     elapsed_time_s: float = 0.0
     throughput_lines_per_sec: float = 0.0
     unique_errors: dict[str, tuple[PipelineResult, int]] = field(default_factory=dict)
+    true_positives: int = 0
+    true_negatives: int = 0
+    false_positives: int = 0
+    false_negatives: int = 0
+    has_ground_truth: bool = False
 
     def __post_init__(self) -> None:
         if not self.file_name:
             self.file_name = self.source_name
+
+    @property
+    def precision(self) -> float:
+        """Precision (TP / (TP + FP)) if ground truth is tracked."""
+        denom = self.true_positives + self.false_positives
+        return (self.true_positives / denom) if denom > 0 else 0.0
+
+    @property
+    def recall(self) -> float:
+        """Recall (TP / (TP + FN)) if ground truth is tracked."""
+        denom = self.true_positives + self.false_negatives
+        return (self.true_positives / denom) if denom > 0 else 0.0
+
+    @property
+    def f1(self) -> float:
+        """F1 harmonic mean of precision and recall."""
+        p = self.precision
+        r = self.recall
+        return (2 * p * r / (p + r)) if (p + r) > 0 else 0.0
+
+    @property
+    def accuracy(self) -> float:
+        """Overall classification accuracy ((TP + TN) / Total)."""
+        tot = (
+            self.true_positives + self.true_negatives + self.false_positives + self.false_negatives
+        )
+        return ((self.true_positives + self.true_negatives) / tot) if tot > 0 else 0.0
+
+    def record_ground_truth(self, actual_actionable: bool, predicted_actionable: bool) -> None:
+        """Record a single ground-truth prediction pair into the confusion counts."""
+        self.has_ground_truth = True
+        if predicted_actionable and actual_actionable:
+            self.true_positives += 1
+        elif predicted_actionable and not actual_actionable:
+            self.false_positives += 1
+        elif not predicted_actionable and not actual_actionable:
+            self.true_negatives += 1
+        else:
+            self.false_negatives += 1
 
     @property
     def remaining_count(self) -> int:
@@ -85,18 +128,17 @@ class LogProcessingStats:
         return max(self.total_lines - self.processed_count, 0)
 
     def record_result(self, result: PipelineResult) -> None:
-        """Accumulate counts, costs, and deduplicated errors from a pipeline result."""
+        """Accumulate counts and deduplicated errors from a pipeline result."""
         self.processed_count += 1
-        self.total_cost_usd += result.cost_usd
 
-        if result.cost_usd > 0.0 or result.status == "AGENT_RESOLVED":
+        if result.from_llm or result.status == "AGENT_RESOLVED":
             self.llm_lane_count += 1
         else:
             self.fast_lane_count += 1
 
         if result.status == "TELEMETRY_FILTERED":
             self.benign_count += 1
-            if result.cost_usd > 0.0:
+            if result.from_llm:
                 self.llm_needed_count += 1
             return
 
@@ -134,7 +176,6 @@ class LogPipeline:
         self,
         rule_engine: RuleTreeEngine | None = None,
         settings: Settings | None = None,
-        agent_cost_usd: float = 0.0015,
         on_result: Callable[[PipelineResult], Any] | None = None,
         persist_runbooks: bool = False,
         concurrency_limit: int | None = 5,
@@ -145,7 +186,6 @@ class LogPipeline:
             if rule_engine is not None
             else RuleTreeEngine.with_defaults(rules_path=self.settings.rules_path)
         )
-        self.agent_cost_usd: float = agent_cost_usd
         self.persist_runbooks: bool = persist_runbooks
         self.concurrency_limit: int | None = concurrency_limit
         self.active_llm_count: int = 0
@@ -235,21 +275,29 @@ class LogPipeline:
                     log_id=log_id,
                     status="TELEMETRY_FILTERED",
                     resolution=None,
-                    cost_usd=0.0,
                     latency_ms=latency_ms,
                 )
             )
-        if matched_rule is not None and matched_rule.resolution is not None:
-            latency_ms = (time.perf_counter() - start) * 1000.0
-            return self._notify_result(
-                PipelineResult(
-                    log_id=log_id,
-                    status="FAST_PATH_HIT",
-                    resolution=matched_rule.resolution,
-                    cost_usd=0.0,
-                    latency_ms=latency_ms,
+        if matched_rule is not None:
+            resolved = matched_rule.resolution
+            if resolved is None and matched_rule.runbook_id:
+                rb = get_runbook_by_id(
+                    matched_rule.runbook_id,
+                    path=self.settings.runbooks_path,
                 )
-            )
+                if rb is not None:
+                    resolved = rb.to_problem_resolution()
+                    matched_rule.resolution = resolved
+            if resolved is not None:
+                latency_ms = (time.perf_counter() - start) * 1000.0
+                return self._notify_result(
+                    PipelineResult(
+                        log_id=log_id,
+                        status="FAST_PATH_HIT",
+                        resolution=resolved,
+                        latency_ms=latency_ms,
+                    )
+                )
         return None
 
     async def _escalate_and_learn(
@@ -266,13 +314,20 @@ class LogPipeline:
                 event,
                 known_groups=self.rule_engine.get_known_groups_info(),
             )
-            self.rule_engine.create_rule_from_resolution(event, resolution)
+            runbook_id: str | None = None
             if not resolution.is_benign:
-                create_runbook_from_resolution(
+                rb_entry = create_runbook_from_resolution(
                     event,
                     resolution,
                     persist=self.persist_runbooks,
+                    path=self.settings.runbooks_path,
                 )
+                runbook_id = rb_entry.runbook_id
+            self.rule_engine.create_rule_from_resolution(
+                event,
+                resolution,
+                runbook_id=runbook_id,
+            )
         finally:
             self.active_llm_count = max(self.active_llm_count - 1, 0)
             self._sync_active_llm()
@@ -284,7 +339,7 @@ class LogPipeline:
                     log_id=log_id,
                     status="TELEMETRY_FILTERED",
                     resolution=None,
-                    cost_usd=self.agent_cost_usd,
+                    from_llm=True,
                     latency_ms=latency_ms,
                 )
             )
@@ -294,7 +349,7 @@ class LogPipeline:
                     log_id=log_id,
                     status="AGENT_RESOLVED",
                     resolution=resolution,
-                    cost_usd=self.agent_cost_usd,
+                    from_llm=True,
                     latency_ms=latency_ms,
                 )
             )
@@ -304,8 +359,8 @@ class LogPipeline:
         """Process a single raw HPC log line through the two-tier Regex Tree pipeline.
 
         1. Matches raw line against the Regex Tree (Parent Envelope -> Child Rule).
-        2. Filters benign telemetry child rules at wire speed (<0.1ms, $0 cost).
-        3. Resolves actionable error child rules via fast-path (<0.1ms, $0 cost).
+        2. Filters benign telemetry child rules at wire speed (<0.1ms).
+        3. Resolves actionable error child rules via fast-path (<0.1ms).
         4. Escalates novel logs to the SRE Agent and registers/deduplicates parent/child rules.
         """
         start = time.perf_counter()

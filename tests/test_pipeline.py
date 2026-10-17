@@ -22,12 +22,15 @@ from src.pipeline import LogPipeline, PipelineResult
 @pytest.fixture
 def test_settings(tmp_path: Path) -> Settings:
     rules_file = tmp_path / "rules.json"
+    runbooks_file = tmp_path / "runbooks.json"
     shutil.copyfile("resources/rules.json", rules_file)
+    shutil.copyfile("resources/runbooks.json", runbooks_file)
     return Settings(
         base_url="https://test.nvidia.com/v1",
         api_key="test-key",
         model_name="nvidia/nemotron-3-super-120b-a12b",
         rules_path=str(rules_file),
+        runbooks_path=str(runbooks_file),
     )
 
 
@@ -48,7 +51,7 @@ def mock_resolution() -> ProblemResolution:
 
 @pytest.mark.anyio
 async def test_pipeline_filters_telemetry(test_settings: Settings) -> None:
-    """Verify benign telemetry child rule returns TELEMETRY_FILTERED with cost_usd=0.0."""
+    """Verify benign telemetry child rule returns TELEMETRY_FILTERED."""
     pipeline = LogPipeline(settings=test_settings)
 
     telemetry_line = (
@@ -58,14 +61,13 @@ async def test_pipeline_filters_telemetry(test_settings: Settings) -> None:
 
     assert isinstance(result, PipelineResult)
     assert result.status == "TELEMETRY_FILTERED"
-    assert result.cost_usd == 0.0
     assert result.resolution is None
     assert result.latency_ms >= 0.0
 
 
 @pytest.mark.anyio
 async def test_pipeline_hits_fast_path(test_settings: Settings) -> None:
-    """Verify pre-configured rule returns FAST_PATH_HIT with cost_usd=0.0."""
+    """Verify pre-configured rule returns FAST_PATH_HIT."""
     pipeline = LogPipeline(settings=test_settings)
 
     known_error_line = (
@@ -75,7 +77,6 @@ async def test_pipeline_hits_fast_path(test_settings: Settings) -> None:
 
     assert isinstance(result, PipelineResult)
     assert result.status == "FAST_PATH_HIT"
-    assert result.cost_usd == 0.0
     assert result.resolution is not None
     assert "PSU failure" in result.resolution.error_summary
 
@@ -99,13 +100,13 @@ async def test_pipeline_dynamic_rule_learning(
     with create_agent().override(model=test_model):
         result1 = await pipeline.process_log(novel_error_line1)
         assert result1.status == "AGENT_RESOLVED"
-        assert result1.cost_usd > 0.0
+        assert result1.from_llm is True
         assert result1.resolution is not None
         assert result1.resolution.error_summary == mock_resolution.error_summary
 
         result2 = await pipeline.process_log(novel_error_line2)
         assert result2.status == "FAST_PATH_HIT"
-        assert result2.cost_usd == 0.0
+        assert result2.from_llm is False
         assert result2.resolution is not None
         assert result2.resolution.error_summary == mock_resolution.error_summary
 
@@ -168,6 +169,10 @@ def test_cli_evaluate_runs_and_prints(capsys: pytest.CaptureFixture[str]) -> Non
     assert "HPC OPERATIONAL SLA BREAKDOWN" in captured
     assert "Wire-Speed Telemetry Dropping SLA" in captured
     assert "Fast-Path Rule Tree Resolution SLA" in captured
+    assert "Precision" in captured
+    assert "Recall" in captured
+    assert "Accuracy" in captured
+    assert "F1 Score" in captured
 
 
 def test_cli_main_dispatch() -> None:
@@ -264,12 +269,15 @@ async def test_pipeline_concurrent_post_facto_deduplication(
 ) -> None:
     """Verify concurrent cold-start workers deduplicate learned rules after the fact."""
     rules_file = tmp_path / "empty_rules.json"
+    runbooks_file = tmp_path / "runbooks.json"
     rules_file.write_text("[]", encoding="utf-8")
+    shutil.copyfile("resources/runbooks.json", runbooks_file)
     cold_settings = Settings(
         base_url="https://test.nvidia.com/v1",
         api_key="test-key",
         model_name="nvidia/nemotron-3-super-120b-a12b",
         rules_path=str(rules_file),
+        runbooks_path=str(runbooks_file),
     )
 
     res_variant_a = ProblemResolution(
@@ -325,18 +333,17 @@ def test_log_processing_stats_recording(mock_resolution: ProblemResolution) -> N
     stats = LogProcessingStats(source_name="File", file_name="test.log", total_lines=4)
     assert stats.remaining_count == 4
 
-    r_benign = PipelineResult(log_id="1", status="TELEMETRY_FILTERED", cost_usd=0.0)
+    r_benign = PipelineResult(log_id="1", status="TELEMETRY_FILTERED")
     r_fast = PipelineResult(
         log_id="2",
         status="FAST_PATH_HIT",
         resolution=mock_resolution,
-        cost_usd=0.0,
     )
     r_agent = PipelineResult(
         log_id="3",
         status="AGENT_RESOLVED",
         resolution=mock_resolution,
-        cost_usd=0.0015,
+        from_llm=True,
     )
 
     stats.record_results([r_benign, r_fast, r_agent])
@@ -350,6 +357,5 @@ def test_log_processing_stats_recording(mock_resolution: ProblemResolution) -> N
     assert stats.error_count == 2
     assert stats.auto_annotated_count == 1
     assert stats.llm_needed_count == 1
-    assert stats.total_cost_usd == pytest.approx(0.0015)
     assert len(stats.unique_errors) == 1
     assert stats.throughput_lines_per_sec > 0.0

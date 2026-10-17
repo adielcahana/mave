@@ -119,7 +119,18 @@ def evaluate_benchmark(
             telemetry_filtered += 1
             predicted_actionable = False
         else:
-            if matched_rule is not None and matched_rule.resolution is not None:
+            resolved = matched_rule.resolution if matched_rule is not None else None
+            if matched_rule is not None and resolved is None and matched_rule.runbook_id:
+                from src.knowledge.docs_db import get_runbook_by_id
+
+                rb = get_runbook_by_id(matched_rule.runbook_id)
+                if rb is not None:
+                    resolved = rb.to_problem_resolution()
+                    matched_rule.resolution = resolved
+
+            if matched_rule is not None and (
+                resolved is not None or matched_rule.runbook_id is not None
+            ):
                 fast_path_hits += 1
             else:
                 agent_fallbacks += 1
@@ -180,7 +191,7 @@ def format_metrics_table(metrics: BenchmarkMetrics) -> str:
         row("F1 Score", f"{metrics.f1:.3f}"),
         sep,
         row("Telemetry Filtered (Drop)", f"{metrics.telemetry_filtered} ({filt_pct:.1f}%)"),
-        row("Fast-Path Hits ($0, <1ms)", f"{metrics.fast_path_hits} ({fast_pct:.1f}%)"),
+        row("Fast-Path Hits (<1ms)", f"{metrics.fast_path_hits} ({fast_pct:.1f}%)"),
         row("Agent Fallbacks (LLM)", f"{metrics.agent_fallbacks} ({fall_pct:.1f}%)"),
         sep,
         row("True Positives", str(metrics.true_positives)),
